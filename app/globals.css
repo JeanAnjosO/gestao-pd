@@ -74,6 +74,8 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
   .calendar-panel .calendar>button span{font-size:.64rem}
 }
 .calendar-day-card.has-conflict{border-color:#bd4f4f;box-shadow:inset 4px 0 #bd4f4f}.calendar-day-card.has-conflict>header small{color:#a43c3c;font-weight:800}
+.calendar-share-board tbody td:nth-child(1){background:#e7f2fb!important}.calendar-share-board tbody td:nth-child(5){background:#edf6ee!important}.calendar-share-board tbody td:nth-child(2),.calendar-share-board tbody td:nth-child(3),.calendar-share-board tbody td:nth-child(4){font-weight:800}.calendar-share-board .board-week-row td{height:30px!important;padding:6px 10px!important;background:#dfe9e2!important;color:#244b39!important;border-color:#b7c8bc!important;font-size:12px!important;font-weight:900!important;letter-spacing:.08em;text-transform:uppercase}.nickname-input{width:150px;min-height:34px;margin:5px 0;padding:6px 8px;font-size:.75rem}
+.menu-icon-faltas::before,.menu-icon-faltas::after{display:none}
 
 /* Calendário operacional e quadro compartilhável. */
 .menu-icon-calendario{border:1px solid #668174;background:linear-gradient(currentColor,currentColor) 3px 6px/14px 1px no-repeat}.menu-icon-calendario::before{content:"";position:absolute;inset:4px;border:1px solid currentColor;border-radius:2px}.menu-icon-calendario::after{content:"";position:absolute;left:7px;top:2px;width:2px;height:5px;border-radius:2px;background:currentColor;box-shadow:6px 0 currentColor}

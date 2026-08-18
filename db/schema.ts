@@ -9,6 +9,7 @@ export const calendarModeTypes = sqliteTable("calendar_mode_types", {
 export const units = sqliteTable("units", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   name: text("name").notNull(),
+  nickname: text("nickname"),
   minimumTeachers: integer("minimum_teachers").notNull().default(4),
   calendarModeTypeId: integer("calendar_mode_type_id").notNull().default(1).references(() => calendarModeTypes.id),
   active: integer("active", { mode: "boolean" }).notNull().default(true),
