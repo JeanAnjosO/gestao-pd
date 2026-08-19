@@ -449,9 +449,17 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     baseAssignments.forEach(item => { const set = occupied.get(item.date) ?? new Set<number>(); set.add(item.person_id); occupied.set(item.date, set); });
     const choose = (date: string, type: number, classId: number | null) => {
       const daily = occupied.get(date) ?? new Set<number>();
-      const receptionPriority = (person: PersonRow) => isPersonType(person, "reception") ? 0 : RECEPTION_PRIORITY_PERSON_IDS.includes(person.id) ? 1 : 2;
-      const available = candidatesFor(date, type, classId).filter(person => !daily.has(person.id)).sort((a,b) => (type === ASSIGNMENT_TYPES.reception ? receptionPriority(a) - receptionPriority(b) : 0) || (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0) || a.name.localeCompare(b.name));
-      const person = available[0];
+      const available = candidatesFor(date, type, classId).filter(person => !daily.has(person.id));
+      let person: PersonRow | undefined;
+      if (type === ASSIGNMENT_TYPES.reception) {
+        const fixedReception = available.filter(item => isPersonType(item, "reception"));
+        const priorityGroup = available.filter(item => !isPersonType(item, "reception") && RECEPTION_PRIORITY_PERSON_IDS.includes(item.id));
+        const remainingGroup = available.filter(item => !isPersonType(item, "reception") && !RECEPTION_PRIORITY_PERSON_IDS.includes(item.id));
+        const drawPool = fixedReception.length ? fixedReception : priorityGroup.length ? priorityGroup : remainingGroup;
+        person = drawPool[Math.floor(Math.random() * drawPool.length)];
+      } else {
+        person = available.sort((a,b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0) || a.name.localeCompare(b.name))[0];
+      }
       if (!person) return null;
       daily.add(person.id); occupied.set(date, daily); counts.set(person.id, (counts.get(person.id) ?? 0) + 1);
       return person.id;
