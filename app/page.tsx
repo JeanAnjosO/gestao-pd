@@ -28,6 +28,7 @@ type CalendarNoteRow = { id: number; date: string; note: string };
 type CapabilityRow = { person_id: number; capability_type_id: 1 | 2 };
 type CompensationRateRow = { unit_id: number; level_code: number; half_day_amount: number; full_day_amount: number; fixed_daily_amount: number; hourly_amount: number };
 type PasswordRecoveryRow = { id: number; person_id: number; username_snapshot: string; requested_at: string; expires_at: string; status: "pending" | "completed" | "cancelled" };
+type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
 const PERSON_TYPES = { manager: 1, teacher: 2, intern: 3, reception: 4 } as const;
 const FUNCTION_TYPES = { conductor: 1, follower: 2, both: 3 } as const;
 const CALENDAR_MODES = { simple: 1, colors: 2 } as const;
@@ -93,6 +94,38 @@ const saveImageBlob = async (blob: Blob, fileName: string, title: string) => {
   link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 };
+
+function InstallAppPrompt() {
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
+  const [visible, setVisible] = useState(false);
+  const [showInstructions, setShowInstructions] = useState(false);
+  const isIos = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  useEffect(() => {
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+    if (standalone || window.localStorage.getItem("gestao-pd-install-dismissed") === "1") return;
+    const reveal = window.setTimeout(() => setVisible(true), 1200);
+    const capture = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPromptEvent); setVisible(true); };
+    window.addEventListener("beforeinstallprompt", capture);
+    return () => { window.clearTimeout(reveal); window.removeEventListener("beforeinstallprompt", capture); };
+  }, []);
+  if (!visible) return null;
+  const install = async () => {
+    if (installPrompt) {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === "accepted") setVisible(false);
+      setInstallPrompt(null);
+    } else setShowInstructions(true);
+  };
+  const dismiss = () => { window.localStorage.setItem("gestao-pd-install-dismissed", "1"); setVisible(false); };
+  return <aside className="install-app-card" aria-label="Instalar Gestão PD">
+    <button type="button" className="install-close" aria-label="Fechar aviso de instalação" onClick={dismiss}>×</button>
+    <img src="/icon-192.png" alt="" width="46" height="46" />
+    <div><strong>Gestão PD no celular</strong><span>Adicione à tela inicial e abra como um aplicativo.</span></div>
+    <button type="button" className="primary" onClick={install}>Instalar</button>
+    {showInstructions && <div className="install-instructions" role="dialog" aria-label="Como instalar"><strong>{isIos ? "No iPhone" : "No navegador"}</strong><p>{isIos ? <>Toque em <b>Compartilhar</b>, escolha <b>Adicionar à Tela de Início</b>, ative <b>Abrir como App da Web</b> e toque em <b>Adicionar</b>.</> : <>Abra o menu do navegador e escolha <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.</>}</p><button type="button" onClick={() => setShowInstructions(false)}>Entendi</button></div>}
+  </aside>;
+}
 
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -244,7 +277,7 @@ export default function Home() {
 
   if (!profile) {
     return (
-      <main className="login-page">
+      <><main className="login-page">
         <section className="login-brand"><span>Gestão</span><h1>PD<br />Buritis</h1><p>Escalas, faltas e aulas solo em um só lugar.</p></section>
         <section className="login-panel">
           {authView === "login" ? <form action={login}>
@@ -263,12 +296,12 @@ export default function Home() {
             <button className="login-text-action" type="button" onClick={() => { setAuthView("login"); setAuthError(""); setRecoveryMessage(""); }}>Voltar para o login</button>
           </form>}
         </section>
-      </main>
+      </main><InstallAppPrompt /></>
     );
   }
 
   if (profile.must_change_password) {
-    return <main className="login-page"><section className="login-brand"><span>PD</span><h1>Primeiro<br />acesso</h1><p>Crie sua senha definitiva para continuar.</p></section><section className="login-panel"><form action={changePassword}><small>SEGURANÇA DA CONTA</small><h2>Olá, {profile.name.split(" ")[0]}</h2><p>A senha deve ter pelo menos 6 caracteres.</p><label>Nova senha<input name="new_password" type="password" minLength={6} autoComplete="new-password" required /></label><label>Confirmar senha<input name="confirm_password" type="password" minLength={6} autoComplete="new-password" required /></label>{authError && <p className="form-error">{authError}</p>}<button className="primary" disabled={authBusy}>{authBusy ? "Salvando…" : "Definir nova senha"}</button></form></section></main>;
+    return <><main className="login-page"><section className="login-brand"><span>PD</span><h1>Primeiro<br />acesso</h1><p>Crie sua senha definitiva para continuar.</p></section><section className="login-panel"><form action={changePassword}><small>SEGURANÇA DA CONTA</small><h2>Olá, {profile.name.split(" ")[0]}</h2><p>A senha deve ter pelo menos 6 caracteres.</p><label>Nova senha<input name="new_password" type="password" minLength={6} autoComplete="new-password" required /></label><label>Confirmar senha<input name="confirm_password" type="password" minLength={6} autoComplete="new-password" required /></label>{authError && <p className="form-error">{authError}</p>}<button className="primary" disabled={authBusy}>{authBusy ? "Salvando…" : "Definir nova senha"}</button></form></section></main><InstallAppPrompt /></>;
   }
 
   const logout = async () => { await supabase.auth.signOut({ scope: "local" }); window.localStorage.removeItem(SESSION_STARTED_KEY); setProfile(null); };
@@ -280,7 +313,7 @@ export default function Home() {
     profile.level ? `nível ${profile.level}` : null,
   ].filter(Boolean).join(" - ");
   return (
-    <main className={`app-shell role-${role} ${sidebarExpanded ? "sidebar-expanded" : "sidebar-collapsed"}`}>
+    <><main className={`app-shell role-${role} ${sidebarExpanded ? "sidebar-expanded" : "sidebar-collapsed"}`}>
       <aside aria-label="Navegação principal">
         <button type="button" className="sidebar-toggle" onClick={() => setSidebarExpanded(value => !value)} aria-label={sidebarExpanded ? "Ocultar barra lateral" : "Expandir barra lateral"}>{sidebarExpanded ? "‹" : "›"}</button>
         <div className="brand"><span>Gestão</span><div><strong>PD</strong><small>BURITIS</small></div></div>
@@ -302,7 +335,7 @@ export default function Home() {
           {screen === "parametros" && <Parameters profile={profile} unitId={unitId} units={units} setUnits={setUnits} selectUnit={setUnitId} openingDays={openingDays} setOpeningDays={setOpeningDays} operationExceptions={operationExceptions} setOperationExceptions={setOperationExceptions} people={people} setPeople={setPeople} schedules={schedules} setSchedules={setSchedules} soloRows={soloRows} />}
         </div>
       </section>
-    </main>
+    </main><InstallAppPrompt /></>
   );
 }
 
