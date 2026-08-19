@@ -16,6 +16,14 @@ button { cursor:pointer; }
 .login-panel h2 { font-size:2rem; margin:0; }
 .login-panel p { color:var(--muted); margin:-12px 0 10px; }
 .login-panel .form-error { color:var(--red);background:var(--red-bg);padding:10px;border-radius:8px;margin:0; }
+.login-text-action { border:0; background:transparent; color:var(--forest); text-decoration:underline; justify-self:center; cursor:pointer; }
+.recovery-message { color:var(--forest)!important; background:#e8f3ed; padding:12px; border-radius:10px; margin:0!important; line-height:1.45; }
+.recovery-list { display:grid; gap:10px; }
+.recovery-list article,.recovery-credential { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px; border:1px solid var(--line); border-radius:12px; background:#f8faf9; }
+.recovery-list article>div,.recovery-credential>div { display:grid; gap:4px; }
+.recovery-list article small,.recovery-credential span { color:var(--muted); }
+.recovery-credential { margin-bottom:14px; background:#e8f3ed; border-color:#b9d5c6; }
+.recovery-credential strong { font-size:1.35rem; letter-spacing:.08em; }
 label { color:var(--muted); font-size:.85rem; }
 input,select { width:100%; margin-top:6px; padding:11px 12px; border:1px solid var(--line); border-radius:9px; background:var(--paper); color:var(--ink); }
 .primary { border:0; border-radius:9px; background:var(--green); color:white; padding:11px 15px; font-weight:600; }

@@ -33,7 +33,7 @@ Deno.serve(async request => {
     return json({ completed: true });
   }
   const { data: manager } = await admin.from("people").select("id,access_role_type_id,active").eq("auth_user_id", authData.user.id).single();
-  if (!manager || manager.access_role_type_id !== 1 || !manager.active) return json({ error: "forbidden" }, 403);
+  if (!manager || manager.access_role_type_id !== 5 || !manager.active) return json({ error: "forbidden" }, 403);
   const { data: person } = await admin.from("people").select("id,name,username,auth_user_id,active").eq("id", Number(body.person_id)).single();
   if (!person) return json({ error: "person_not_found" }, 404);
   const password = makePassword();
@@ -51,5 +51,8 @@ Deno.serve(async request => {
     }
   }
   await admin.from("people").update({ must_change_password: true }).eq("id", person.id);
+  if (body.recovery_request_id) {
+    await admin.from("password_recovery_requests").update({ status: "completed", completed_at: new Date().toISOString(), completed_by: manager.id }).eq("id", Number(body.recovery_request_id)).eq("person_id", person.id).eq("status", "pending");
+  }
   return json({ credentials: [{ person_id: person.id, name: person.name, username: person.username, temporary_password: password }] });
 });

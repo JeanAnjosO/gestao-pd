@@ -7,7 +7,7 @@ import { supabase } from "./supabase";
 type Screen = "visao" | "calendario" | "faltas" | "solo" | "substituicoes" | "relatorios" | "parametros";
 type Role = "gestor" | "professor" | "recepcao";
 type PersonTypeId = 1 | 2 | 3 | 4;
-type AccessRoleTypeId = 1 | 2 | 3 | 4;
+type AccessRoleTypeId = 1 | 2 | 3 | 4 | 5;
 type FunctionTypeId = 1 | 2 | 3;
 type Profile = { id: number; username: string; name: string; nickname: string | null; person_type_id: PersonTypeId; access_role_type_id: AccessRoleTypeId; function_type_id: FunctionTypeId | null; level: number | null; must_change_password: boolean };
 type ClassRow = { id: number; name: string; allowed_for_half_day: boolean };
@@ -27,19 +27,23 @@ type CalendarAssignmentRow = { id: number; date: string; assignment_type_id: 1 |
 type CalendarNoteRow = { id: number; date: string; note: string };
 type CapabilityRow = { person_id: number; capability_type_id: 1 | 2 };
 type CompensationRateRow = { unit_id: number; level_code: number; half_day_amount: number; full_day_amount: number; fixed_daily_amount: number; hourly_amount: number };
+type PasswordRecoveryRow = { id: number; person_id: number; username_snapshot: string; requested_at: string; expires_at: string; status: "pending" | "completed" | "cancelled" };
 const PERSON_TYPES = { manager: 1, teacher: 2, intern: 3, reception: 4 } as const;
 const FUNCTION_TYPES = { conductor: 1, follower: 2, both: 3 } as const;
 const CALENDAR_MODES = { simple: 1, colors: 2 } as const;
 const ASSIGNMENT_TYPES = { lead: 1, sound: 2, reception: 3 } as const;
 const CLASS_TYPES = [{ id: 3 as const, label: "Preta", code: "black" }, { id: 2 as const, label: "Azul", code: "blue" }, { id: 1 as const, label: "Branca", code: "white" }];
 const CAPABILITIES = { coverReception: 1, leadBlack: 2 } as const;
+const ADMIN_ACCESS_ROLE_ID = 5;
 const RECEPTION_PRIORITY_PERSON_IDS = [1, 2, 3, 4];
+const SESSION_TTL_MS = 10 * 60 * 1000;
+const SESSION_STARTED_KEY = "gestao-pd-session-start";
 const CALENDAR_TEAM_RELEASE_AT = new Date("2026-09-01T00:00:00-03:00").getTime();
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 const personTypeOptions: { id: PersonTypeId; label: string }[] = [{ id: 1, label: "Gestor" }, { id: 2, label: "Professor" }, { id: 3, label: "Estagiário" }, { id: 4, label: "Recepção" }];
 const functionTypeOptions: { id: FunctionTypeId; label: string }[] = [{ id: 1, label: "Condutor" }, { id: 2, label: "Conduzido" }, { id: 3, label: "Duas funções" }];
 const isPersonType = (person: Pick<PersonRow, "person_type_id"> | Pick<Profile, "person_type_id">, type: keyof typeof PERSON_TYPES) => person.person_type_id === PERSON_TYPES[type];
-const toUiRole = (value: AccessRoleTypeId): Role => value === PERSON_TYPES.manager ? "gestor" : value === PERSON_TYPES.teacher ? "professor" : "recepcao";
+const toUiRole = (value: AccessRoleTypeId): Role => value === PERSON_TYPES.manager || value === ADMIN_ACCESS_ROLE_ID ? "gestor" : value === PERSON_TYPES.teacher ? "professor" : "recepcao";
 
 const labels: Record<Screen, string> = {
   visao: "Visão geral",
@@ -95,6 +99,8 @@ export default function Home() {
   const [authReady, setAuthReady] = useState(false);
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
+  const [authView, setAuthView] = useState<"login" | "forgot">("login");
+  const [recoveryMessage, setRecoveryMessage] = useState("");
   const [role, setRole] = useState<Role>("gestor");
   const [screen, setScreen] = useState<Screen>("visao");
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -119,6 +125,16 @@ export default function Home() {
     const loadProfile = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
+        const storedStart = Number(window.localStorage.getItem(SESSION_STARTED_KEY));
+        const sessionStart = storedStart || Date.parse(session.user.last_sign_in_at ?? "") || Date.now();
+        if (Date.now() - sessionStart >= SESSION_TTL_MS) {
+          await supabase.auth.signOut({ scope: "local" });
+          window.localStorage.removeItem(SESSION_STARTED_KEY);
+          setAuthError("Sua sessão expirou. Entre novamente.");
+          setAuthReady(true);
+          return;
+        }
+        window.localStorage.setItem(SESSION_STARTED_KEY, String(sessionStart));
         const { data } = await supabase.from("people").select("id,username,name,nickname,person_type_id,access_role_type_id,function_type_id,level,must_change_password").eq("auth_user_id", session.user.id).single();
         if (data) { setProfile(data as Profile); setRole(toUiRole(data.access_role_type_id as AccessRoleTypeId)); }
       }
@@ -126,10 +142,23 @@ export default function Home() {
     };
     void loadProfile();
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") setProfile(null);
+      if (event === "SIGNED_OUT") { window.localStorage.removeItem(SESSION_STARTED_KEY); setProfile(null); }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!profile) return;
+    const startedAt = Number(window.localStorage.getItem(SESSION_STARTED_KEY)) || Date.now();
+    window.localStorage.setItem(SESSION_STARTED_KEY, String(startedAt));
+    const remaining = Math.max(0, SESSION_TTL_MS - (Date.now() - startedAt));
+    const timeout = window.setTimeout(async () => {
+      await supabase.auth.signOut({ scope: "local" });
+      window.localStorage.removeItem(SESSION_STARTED_KEY);
+      setProfile(null); setAuthView("login"); setAuthError("Sua sessão expirou após 10 minutos. Entre novamente.");
+    }, remaining);
+    return () => window.clearTimeout(timeout);
+  }, [profile]);
 
   useEffect(() => {
     if (!profile) return;
@@ -185,7 +214,16 @@ export default function Home() {
     if (error) { setAuthError("Usuário ou senha inválidos."); setAuthBusy(false); return; }
     const { data, error: profileError } = await supabase.from("people").select("id,username,name,nickname,person_type_id,access_role_type_id,function_type_id,level,must_change_password").eq("auth_user_id", authData.user.id).single();
     if (profileError || !data) { await supabase.auth.signOut(); setAuthError("Conta sem perfil de acesso."); setAuthBusy(false); return; }
+    window.localStorage.setItem(SESSION_STARTED_KEY, String(Date.now()));
     setProfile(data as Profile); setRole(toUiRole(data.access_role_type_id as AccessRoleTypeId)); setScreen("visao"); setAuthBusy(false);
+  };
+
+  const requestPasswordRecovery = async (form: FormData) => {
+    setAuthBusy(true); setAuthError(""); setRecoveryMessage("");
+    const username = String(form.get("recovery_username") ?? "").trim().toLowerCase();
+    const { data } = await supabase.functions.invoke("request-password-recovery", { body: { username } });
+    setRecoveryMessage(data?.message ?? "Se o usuário estiver cadastrado, a gestão receberá a solicitação. Entre em contato com o administrador para receber a nova senha.");
+    setAuthBusy(false);
   };
 
   const changePassword = async (form: FormData) => {
@@ -209,13 +247,21 @@ export default function Home() {
       <main className="login-page">
         <section className="login-brand"><span>Gestão</span><h1>PD<br />Buritis</h1><p>Escalas, faltas e aulas solo em um só lugar.</p></section>
         <section className="login-panel">
-          <form action={login}>
+          {authView === "login" ? <form action={login}>
             <small>ACESSO À PLATAFORMA</small><h2>Bem-vindo</h2><p>Entre com seu usuário e senha.</p>
             <label>Usuário<input name="username" autoComplete="username" required /></label>
             <label>Senha<input name="password" type="password" autoComplete="current-password" required /></label>
             {authError && <p className="form-error">{authError}</p>}
             <button className="primary" type="submit" disabled={authBusy}>{authBusy ? "Entrando…" : "Entrar"}</button>
-          </form>
+            <button className="login-text-action" type="button" onClick={() => { setAuthView("forgot"); setAuthError(""); setRecoveryMessage(""); }}>Esqueci minha senha</button>
+          </form> : <form action={requestPasswordRecovery}>
+            <small>RECUPERAÇÃO DE ACESSO</small><h2>Esqueceu a senha?</h2><p>Informe seu usuário para avisar o administrador.</p>
+            <label>Usuário<input name="recovery_username" autoComplete="username" required /></label>
+            {authError && <p className="form-error">{authError}</p>}
+            {recoveryMessage && <p className="recovery-message">{recoveryMessage}</p>}
+            <button className="primary" type="submit" disabled={authBusy}>{authBusy ? "Enviando…" : "Solicitar nova senha"}</button>
+            <button className="login-text-action" type="button" onClick={() => { setAuthView("login"); setAuthError(""); setRecoveryMessage(""); }}>Voltar para o login</button>
+          </form>}
         </section>
       </main>
     );
@@ -225,9 +271,10 @@ export default function Home() {
     return <main className="login-page"><section className="login-brand"><span>PD</span><h1>Primeiro<br />acesso</h1><p>Crie sua senha definitiva para continuar.</p></section><section className="login-panel"><form action={changePassword}><small>SEGURANÇA DA CONTA</small><h2>Olá, {profile.name.split(" ")[0]}</h2><p>A senha deve ter pelo menos 6 caracteres.</p><label>Nova senha<input name="new_password" type="password" minLength={6} autoComplete="new-password" required /></label><label>Confirmar senha<input name="confirm_password" type="password" minLength={6} autoComplete="new-password" required /></label>{authError && <p className="form-error">{authError}</p>}<button className="primary" disabled={authBusy}>{authBusy ? "Salvando…" : "Definir nova senha"}</button></form></section></main>;
   }
 
-  const logout = async () => { await supabase.auth.signOut(); setProfile(null); };
+  const logout = async () => { await supabase.auth.signOut({ scope: "local" }); window.localStorage.removeItem(SESSION_STARTED_KEY); setProfile(null); };
   const selectedUnit = units.find(unit => unit.id === unitId);
   const profileDetails = [
+    profile.access_role_type_id === ADMIN_ACCESS_ROLE_ID ? "Admin" : null,
     personTypeOptions.find(option => option.id === profile.person_type_id)?.label,
     functionTypeOptions.find(option => option.id === profile.function_type_id)?.label,
     profile.level ? `nível ${profile.level}` : null,
@@ -968,6 +1015,17 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
   const [rateBusy, setRateBusy] = useState(false);
   const [membershipBusy, setMembershipBusy] = useState<number | null>(null);
   const [editingUnitId, setEditingUnitId] = useState<number | null>(null);
+  const [recoveryRequests, setRecoveryRequests] = useState<PasswordRecoveryRow[]>([]);
+  const [recoveryCredential, setRecoveryCredential] = useState<{ username: string; password: string; copied: boolean } | null>(null);
+  const isAdmin = profile.access_role_type_id === ADMIN_ACCESS_ROLE_ID;
+  useEffect(() => {
+    if (!isAdmin) return;
+    const loadRecoveryRequests = async () => {
+      const { data } = await supabase.from("password_recovery_requests").select("id,person_id,username_snapshot,requested_at,expires_at,status").eq("status", "pending").gt("expires_at", new Date().toISOString()).order("requested_at");
+      if (data) setRecoveryRequests(data as PasswordRecoveryRow[]);
+    };
+    void loadRecoveryRequests();
+  }, [isAdmin]);
   useEffect(() => {
     if (!temporaryAccess) return;
     const timeout = window.setTimeout(() => setTemporaryAccess(current => current?.personId === temporaryAccess.personId ? null : current), Math.max(0, temporaryAccess.expiresAt - Date.now()));
@@ -1033,9 +1091,10 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
   const changeProfile = async (person: PersonRow, nextTypeId: PersonTypeId) => {
     const level = nextTypeId === PERSON_TYPES.intern ? null : nextTypeId === PERSON_TYPES.reception ? (person.level && person.level <= 3 ? person.level : 1) : (person.level && person.level <= 4 ? person.level : 1);
     const functionTypeId = nextTypeId === PERSON_TYPES.reception ? null : person.function_type_id ?? FUNCTION_TYPES.both;
-    await updatePerson(person, { person_type_id: nextTypeId, access_role_type_id: nextTypeId, function_type_id: functionTypeId, level });
+    await updatePerson(person, { person_type_id: nextTypeId, access_role_type_id: person.access_role_type_id === ADMIN_ACCESS_ROLE_ID ? ADMIN_ACCESS_ROLE_ID : nextTypeId, function_type_id: functionTypeId, level });
   };
   const manageAccess = async (person: PersonRow) => {
+    if (!isAdmin) return;
     setAccessBusy(person.id); setTemporaryAccess(null); setAccessError(null);
     const action = person.auth_user_id ? "reset" : "create";
     const { data, error } = await supabase.functions.invoke("manage-access", { body: { person_id: person.id, action } });
@@ -1045,6 +1104,22 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
       if (!person.auth_user_id) setPeople(people.map(p => p.id === person.id ? { ...p, auth_user_id: "created" } : p));
     } else setAccessError({ personId: person.id, message: "Não foi possível gerar a senha. Tente novamente." });
     setAccessBusy(null);
+  };
+  const completeRecovery = async (request: PasswordRecoveryRow) => {
+    if (!isAdmin) return;
+    setAccessBusy(request.person_id); setAccessError(null); setRecoveryCredential(null);
+    const { data, error } = await supabase.functions.invoke("manage-access", { body: { person_id: request.person_id, action: "reset", recovery_request_id: request.id } });
+    const credential = data?.credentials?.[0];
+    if (!error && credential) {
+      setRecoveryCredential({ username: request.username_snapshot, password: credential.temporary_password, copied: false });
+      setRecoveryRequests(current => current.filter(item => item.id !== request.id));
+    } else setAccessError({ personId: request.person_id, message: "Não foi possível gerar a senha temporária." });
+    setAccessBusy(null);
+  };
+  const copyRecoveryPassword = async () => {
+    if (!recoveryCredential) return;
+    await navigator.clipboard.writeText(recoveryCredential.password);
+    setRecoveryCredential({ ...recoveryCredential, copied: true });
   };
   const copyTemporaryPassword = async () => {
     if (!temporaryAccess) return;
@@ -1167,6 +1242,10 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
     setMembershipBusy(null);
   };
   return <><Title title="Parâmetros" text="Configurações próprias da unidade selecionada." />
+    {isAdmin && <details className="panel collapsible parameters-recovery" open><summary><div><h3>Recuperação de senha</h3><p>Solicitações que aguardam uma senha temporária do Admin.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
+      {recoveryCredential && <div className="recovery-credential"><div><small>SENHA TEMPORÁRIA PARA @{recoveryCredential.username}</small><strong>{recoveryCredential.password}</strong><span>Envie esta senha à pessoa. No próximo acesso, ela deverá criar uma senha definitiva.</span></div><button type="button" className="primary" onClick={copyRecoveryPassword}>{recoveryCredential.copied ? "Copiada" : "Copiar senha"}</button></div>}
+      <div className="recovery-list">{recoveryRequests.length ? recoveryRequests.map(request => <article key={request.id}><div><strong>@{request.username_snapshot}</strong><small>Solicitada em {new Date(request.requested_at).toLocaleString("pt-BR")}</small></div><button type="button" className="access-button" disabled={accessBusy === request.person_id} onClick={() => completeRecovery(request)}>{accessBusy === request.person_id ? "Gerando…" : "Gerar senha temporária"}</button>{accessError?.personId === request.person_id && <small className="access-error">{accessError.message}</small>}</article>) : <p className="hint">Nenhuma solicitação pendente.</p>}</div>
+    </div></details>}
     <details className="panel collapsible parameters-units"><summary><div><h3>Unidades</h3><p>Cadastre uma unidade e vincule-a automaticamente ao seu acesso.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
       <form action={createUnit} className="solo-form parameter-form"><label>Nome da unidade<input name="unit_name" placeholder="Ex.: PD Savassi" required minLength={2} /></label><label>Mínimo de professores<input name="minimum_teachers" type="number" min={1} max={20} defaultValue={4} required /></label><label>Modelo do calendário<select name="calendar_mode_type_id" defaultValue={CALENDAR_MODES.simple}><option value={CALENDAR_MODES.simple}>Escala simples</option><option value={CALENDAR_MODES.colors}>Escala por cores</option></select></label><button className="primary" disabled={unitBusy}>{unitBusy ? "Cadastrando…" : "Adicionar unidade"}</button></form>
       {unitMessage && <p className="operation-message">{unitMessage}</p>}
