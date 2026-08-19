@@ -224,3 +224,4 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
 .calendar-share-board tr.class-blue>.board-duty-cell{background:#d7e9f8!important;color:#28587c!important;border-color:#b7d3e8!important}
 .calendar-share-board tr.class-white>.board-duty-cell,.calendar-share-board tr.class-simple>.board-duty-cell{background:#fff!important;color:#48544e!important}
 .calendar-share-board .board-reception-cell{background:#fff!important;color:#1d2922!important;font-weight:800!important}
+.calendar-share-board .board-note-cell{font-weight:800!important}

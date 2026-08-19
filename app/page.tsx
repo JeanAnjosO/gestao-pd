@@ -447,11 +447,10 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     const counts = new Map<number, number>();
     baseAssignments.forEach(item => counts.set(item.person_id, (counts.get(item.person_id) ?? 0) + 1));
     const generated: { unit_id: number; date: string; assignment_type_id: number; class_type_id: number | null; person_id: number; manually_assigned: boolean; created_by: number; updated_by: number }[] = [];
-    const occupied = new Map<string, Set<number>>();
-    baseAssignments.forEach(item => { const set = occupied.get(item.date) ?? new Set<number>(); set.add(item.person_id); occupied.set(item.date, set); });
     const choose = (date: string, type: number, classId: number | null) => {
-      const daily = occupied.get(date) ?? new Set<number>();
-      const available = candidatesFor(date, type, classId).filter(person => !daily.has(person.id));
+      const assignedSoFar = [...baseAssignments, ...generated].filter(item => item.date === date);
+      const unavailable = new Set(assignedSoFar.filter(item => type === ASSIGNMENT_TYPES.reception || item.assignment_type_id === ASSIGNMENT_TYPES.reception || item.class_type_id === classId).map(item => item.person_id));
+      const available = candidatesFor(date, type, classId).filter(person => !unavailable.has(person.id));
       let person: PersonRow | undefined;
       if (type === ASSIGNMENT_TYPES.reception) {
         const fixedReception = available.filter(item => isPersonType(item, "reception"));
@@ -460,12 +459,16 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
         const drawPool = fixedReception.length ? fixedReception : priorityGroup.length ? priorityGroup : remainingGroup;
         person = drawPool[Math.floor(Math.random() * drawPool.length)];
       } else {
-        const lowestCount = available.length ? Math.min(...available.map(item => counts.get(item.id) ?? 0)) : 0;
-        const balancedPool = available.filter(item => (counts.get(item.id) ?? 0) === lowestCount);
+        const classIndex = classSlots.findIndex(item => item.id === classId);
+        const previousClassId = classIndex > 0 ? classSlots[classIndex - 1].id : undefined;
+        const previousPersonId = previousClassId === undefined ? undefined : assignedSoFar.find(item => item.assignment_type_id === type && item.class_type_id === previousClassId)?.person_id;
+        const rotationPool = available.some(item => item.id !== previousPersonId) ? available.filter(item => item.id !== previousPersonId) : available;
+        const lowestCount = rotationPool.length ? Math.min(...rotationPool.map(item => counts.get(item.id) ?? 0)) : 0;
+        const balancedPool = rotationPool.filter(item => (counts.get(item.id) ?? 0) === lowestCount);
         person = balancedPool[Math.floor(Math.random() * balancedPool.length)];
       }
       if (!person) return null;
-      daily.add(person.id); occupied.set(date, daily); counts.set(person.id, (counts.get(person.id) ?? 0) + 1);
+      counts.set(person.id, (counts.get(person.id) ?? 0) + 1);
       return person.id;
     };
     for (const slot of slotsToFill) {
@@ -518,8 +521,9 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
       return;
     }
     if (!personId) return;
-    if (assignments.some(item => item.date === date && item.person_id === personId && item.id !== current?.id)) {
-      setMessage("Essa pessoa já está ocupando outra função neste dia.");
+    const conflictsWithSelection = assignments.some(item => item.date === date && item.person_id === personId && item.id !== current?.id && (type === ASSIGNMENT_TYPES.reception || item.assignment_type_id === ASSIGNMENT_TYPES.reception || item.class_type_id === classId));
+    if (conflictsWithSelection) {
+      setMessage(type === ASSIGNMENT_TYPES.reception ? "Essa pessoa já está ocupando outra função neste dia." : "Essa pessoa já está ocupando outra função nesta turma.");
       return;
     }
     if (current) {
@@ -570,7 +574,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const formatDay = (date: string) => new Intl.DateTimeFormat("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" }).format(new Date(`${date}T12:00:00`)).replace(".", "");
   const selectFor = (date: string, type: 1 | 2 | 3, classId: 1 | 2 | 3 | null) => {
     const current = assignmentFor(date, type, classId);
-    const occupiedPersonIds = new Set(assignments.filter(item => item.date === date && item.id !== current?.id).map(item => item.person_id));
+    const occupiedPersonIds = new Set(assignments.filter(item => item.date === date && item.id !== current?.id && (type === ASSIGNMENT_TYPES.reception || item.assignment_type_id === ASSIGNMENT_TYPES.reception || item.class_type_id === classId)).map(item => item.person_id));
     const candidates = candidatesFor(date, type, classId).filter(person => !occupiedPersonIds.has(person.id));
     const currentPerson = current ? people.find(person => person.id === current.person_id) : undefined;
     const options = currentPerson && !candidates.some(person => person.id === currentPerson.id) ? [currentPerson, ...candidates] : candidates;
