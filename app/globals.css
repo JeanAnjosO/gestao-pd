@@ -209,3 +209,9 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
   .mobile-sort-controls select,.mobile-sort-controls button{min-height:42px}
   .mobile-sort-controls button{padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:white;color:var(--ink);font-weight:600}
 }
+
+/* Quadro compartilhável: estas cores ficam por último para prevalecer sobre as linhas das turmas. */
+.calendar-share-board table thead th:first-child{background:#8fc2ec!important;color:#17364d!important}
+.calendar-share-board table thead th:last-child{background:#94c79c!important;color:#173b21!important}
+.calendar-share-board table tbody tr:not(.board-week-row)>td.board-date-cell{background:#c9e4fb!important;background-image:none!important;color:#17364d!important}
+.calendar-share-board table tbody tr:not(.board-week-row)>td.board-note-cell{background:#d2ecd7!important;background-image:none!important;color:#244b2c!important}
