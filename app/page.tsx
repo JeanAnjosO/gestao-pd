@@ -380,6 +380,13 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const isManager = role === "gestor";
 
   useEffect(() => {
+    const updateBoardZoom = () => boardRef.current?.style.setProperty("zoom", String(window.innerWidth <= 760 ? Math.min(1, Math.max(0.32, (window.innerWidth - 24) / 900)) : 1));
+    updateBoardZoom();
+    window.addEventListener("resize", updateBoardZoom);
+    return () => window.removeEventListener("resize", updateBoardZoom);
+  }, [tab]);
+
+  useEffect(() => {
     if (!unit) return;
     const load = async () => {
       const [{ data: periodData }, { data: assignmentData }, { data: noteData }, { data: absenceData }, { data: capabilityData }] = await Promise.all([
@@ -562,14 +569,18 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const exportImage = async (share = false) => {
     if (!boardRef.current) return;
     setBusy(true);
+    const board = boardRef.current;
+    const previousZoom = board.style.getPropertyValue("zoom");
+    board.style.setProperty("zoom", "1");
     try {
-      const dataUrl = await toPng(boardRef.current, { cacheBust: true, pixelRatio: 2, backgroundColor: "#f7f4ec" });
+      const dataUrl = await toPng(board, { cacheBust: true, pixelRatio: 2, backgroundColor: "#f7f4ec" });
       const blob = await (await fetch(dataUrl)).blob();
       const fileName = `escala-${unit.name.toLowerCase().replace(/[^a-z0-9]+/gi,"-")}-${start.slice(0,7)}-${range}.png`;
       const file = new File([blob], fileName, { type: "image/png" });
       if (share && navigator.share && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: `Escala ${unit.name} — ${monthLabel}` });
       else { const link = document.createElement("a"); link.download = fileName; link.href = dataUrl; link.click(); }
     } catch { setMessage("Não foi possível gerar a imagem neste dispositivo. Use a opção Imprimir/PDF."); }
+    if (previousZoom) board.style.setProperty("zoom", previousZoom); else board.style.removeProperty("zoom");
     setBusy(false);
   };
 
@@ -816,6 +827,8 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
   const [absences, setAbsences] = useState<AbsenceRow[]>([]);
   const [overrides, setOverrides] = useState<DailyOverrideRow[]>([]);
   const [rates, setRates] = useState<CompensationRateRow[]>([]);
+  const [exportingReport, setExportingReport] = useState(false);
+  const reportRef = useRef<HTMLDivElement>(null);
   const [periodStatus, setPeriodStatus] = useState("open");
   const year = viewMonth.getFullYear();
   const month = viewMonth.getMonth();
@@ -845,6 +858,26 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     const dailyDetail = fixedCount ? `${fixedCount} diária(s) de estágio: ${formatCurrency(dailyAmount)}` : `${halfCount} meia(s) + ${fullCount} completa(s): ${formatCurrency(dailyAmount)}`;
     const soloDetail = `${soloCount} aula(s) solo (30% da hora avulsa): ${formatCurrency(soloAmount)}`;
     return <span className="payment-value" tabIndex={0} title={`${dailyDetail} | ${soloDetail} | Total: ${formatCurrency(total)}`} data-sort-value={total} aria-label={`Total ${formatCurrency(total)}. ${dailyDetail}. ${soloDetail}.`}><strong>{formatCurrency(total)}</strong><span className="payment-breakdown" role="tooltip"><b>{dailyDetail}</b><b>{soloDetail}</b><em>Total: {formatCurrency(total)}</em></span></span>;
+  };
+  const exportReportImage = async () => {
+    if (!reportRef.current) return;
+    const report = reportRef.current;
+    setExportingReport(true);
+    report.classList.add("report-exporting");
+    report.style.width = "1200px";
+    try {
+      const dataUrl = await toPng(report, { cacheBust: true, pixelRatio: 2, backgroundColor: "#f7f4ec", width: 1200 });
+      const link = document.createElement("a");
+      link.download = `relatorio-${prefix}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch {
+      window.alert("Não foi possível gerar a imagem do relatório neste dispositivo.");
+    } finally {
+      report.classList.remove("report-exporting");
+      report.style.removeProperty("width");
+      setExportingReport(false);
+    }
   };
   const rows = reportPeople.map(person => {
     let total = 0;
@@ -888,7 +921,7 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     return [name, full ? `${records.length}, ${full} comp` : String(records.length), "—", paymentCell(dailyAmount, 0, half, full, 0, 0), "0", "Substituto externo", level ? `Nível ${level}` : "—"];
   });
   const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(viewMonth);
-  return <><Title title="Relatório mensal" text="Resumo objetivo de professores e recepção. Gestores não são contabilizados." /><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={3} blueColumns={[0,1,2]} headers={["Pessoa","Total de diárias","Aulas solo","Valor","Faltas","Função","Nível"]} rows={[...rows, ...externalRows]} /></>;
+  return <><Title title="Relatório mensal" text="Resumo objetivo de professores e recepção. Gestores não são contabilizados." /><div className="report-download-actions"><button type="button" className="primary" disabled={exportingReport} onClick={exportReportImage}>{exportingReport ? "Gerando imagem…" : "Baixar relatório"}</button></div><div className="report-export-area" ref={reportRef}><div className="report-image-heading"><span>GESTÃO PD</span><div><h3>Relatório mensal</h3><strong>{monthLabel}</strong></div></div><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={3} blueColumns={[0,1,2]} headers={["Pessoa","Total de diárias","Aulas solo","Valor","Faltas","Função","Nível"]} rows={[...rows, ...externalRows]} /></div></>;
 }
 
 function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays, setOpeningDays, operationExceptions, setOperationExceptions, people, setPeople, schedules, setSchedules, soloRows }: { profile: Profile; unitId: number | null; units: UnitRow[]; setUnits: (v: UnitRow[]) => void; selectUnit: (v: number) => void; openingDays: boolean[]; setOpeningDays: (v: boolean[]) => void; operationExceptions: OperationExceptionRow[]; setOperationExceptions: (v: OperationExceptionRow[]) => void; people: PersonRow[]; setPeople: (v: PersonRow[]) => void; schedules: ScheduleRow[]; setSchedules: (v: ScheduleRow[]) => void; soloRows: SoloRow[] }) {
