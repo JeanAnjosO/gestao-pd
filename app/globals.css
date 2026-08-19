@@ -128,9 +128,9 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
   .role-professor aside .logout-icon{width:25px;height:25px;font-size:1rem}
   .role-professor aside .tooltip-item:hover::after{display:none}
   .role-professor .workspace{display:block;width:100%;min-width:0}
-  .role-professor header{position:sticky;z-index:25;top:0;height:62px;padding:0 14px;box-shadow:0 2px 10px #1b2e2410}
-  .role-professor header>div:first-child small{font-size:.62rem;letter-spacing:.07em}
-  .role-professor header>div:first-child strong{font-size:.95rem}
+  .role-professor .workspace>header{position:sticky;z-index:25;top:0;height:62px;padding:0 14px;box-shadow:0 2px 10px #1b2e2410}
+  .role-professor .workspace>header>div:first-child small{font-size:.62rem;letter-spacing:.07em}
+  .role-professor .workspace>header>div:first-child strong{font-size:.95rem}
   .role-professor .profile{gap:7px}
   .role-professor .profile>div strong{max-width:145px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.82rem}
   .role-professor .profile>div small{font-size:.67rem}
@@ -197,7 +197,7 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
   .role-gestor .manager-mobile-nav .menu-icon{width:25px;height:25px;flex-basis:25px}
   .role-gestor .manager-mobile-nav .more-icon{font-size:.72rem;letter-spacing:1px}
   .role-gestor .workspace{display:block;width:100%;min-width:0}
-  .role-gestor header{position:sticky;z-index:25;top:0;height:62px;padding:0 14px;box-shadow:0 2px 10px #1b2e2410}
+  .role-gestor .workspace>header{position:sticky;z-index:25;top:0;height:62px;padding:0 14px;box-shadow:0 2px 10px #1b2e2410}
   .role-gestor .content{width:100%;padding:14px 12px calc(88px + env(safe-area-inset-bottom));overflow-x:hidden}
   .manager-more-backdrop{position:fixed;z-index:68;inset:0;display:block;border:0;background:#14241b66}
   .manager-more-menu{position:fixed;z-index:70;left:10px;right:10px;bottom:calc(76px + env(safe-area-inset-bottom));display:grid;gap:12px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--paper);box-shadow:0 16px 40px #14241b3d}
