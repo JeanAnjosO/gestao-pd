@@ -72,6 +72,23 @@ const scheduleAppliesOn = (schedule: ScheduleRow, date: string) => schedule.star
 const unitIsOpenOn = (date: string, openingDays: boolean[], exceptions: OperationExceptionRow[]) => exceptions.find(item => item.date === date)?.open ?? openingDays[new Date(`${date}T12:00:00`).getDay()];
 const personLevelLabel = (person?: PersonRow) => !person ? "—" : isPersonType(person, "intern") ? "Estagiário(a)" : person.level ? `Nível ${person.level}` : "—";
 const displayName = (person?: { name: string; nickname?: string | null } | null) => person?.nickname?.trim() || person?.name || "—";
+const saveImageBlob = async (blob: Blob, fileName: string, title: string) => {
+  const file = new File([blob], fileName, { type: "image/png" });
+  const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isAppleMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title }); } catch (error) { if (!(error instanceof DOMException && error.name === "AbortError")) throw error; }
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.download = fileName;
+  link.href = url;
+  link.style.display = "none";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+};
 
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -578,7 +595,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
       const fileName = `escala-${unit.name.toLowerCase().replace(/[^a-z0-9]+/gi,"-")}-${start.slice(0,7)}-${range}.png`;
       const file = new File([blob], fileName, { type: "image/png" });
       if (share && navigator.share && navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], title: `Escala ${unit.name} — ${monthLabel}` });
-      else { const link = document.createElement("a"); link.download = fileName; link.href = dataUrl; link.click(); }
+      else await saveImageBlob(blob, fileName, `Escala ${unit.name} — ${monthLabel}`);
     } catch { setMessage("Não foi possível gerar a imagem neste dispositivo. Use a opção Imprimir/PDF."); }
     if (previousZoom) board.style.setProperty("zoom", previousZoom); else board.style.removeProperty("zoom");
     setBusy(false);
@@ -867,10 +884,8 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     report.style.width = "1200px";
     try {
       const dataUrl = await toPng(report, { cacheBust: true, pixelRatio: 2, backgroundColor: "#f7f4ec", width: 1200 });
-      const link = document.createElement("a");
-      link.download = `relatorio-${prefix}.png`;
-      link.href = dataUrl;
-      link.click();
+      const blob = await (await fetch(dataUrl)).blob();
+      await saveImageBlob(blob, `relatorio-${prefix}.png`, `Relatório mensal — ${monthLabel}`);
     } catch {
       window.alert("Não foi possível gerar a imagem do relatório neste dispositivo.");
     } finally {
