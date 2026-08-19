@@ -32,6 +32,7 @@ const CALENDAR_MODES = { simple: 1, colors: 2 } as const;
 const ASSIGNMENT_TYPES = { lead: 1, sound: 2, reception: 3 } as const;
 const CLASS_TYPES = [{ id: 1 as const, label: "Branca", code: "white" }, { id: 2 as const, label: "Azul", code: "blue" }, { id: 3 as const, label: "Preta", code: "black" }];
 const CAPABILITIES = { coverReception: 1, leadBlack: 2 } as const;
+const RECEPTION_PRIORITY_PERSON_IDS = [1, 2, 3, 4];
 const CALENDAR_TEAM_RELEASE_AT = new Date("2026-09-01T00:00:00-03:00").getTime();
 const personTypeOptions: { id: PersonTypeId; label: string }[] = [{ id: 1, label: "Gestor" }, { id: 2, label: "Professor" }, { id: 3, label: "Estagiário" }, { id: 4, label: "Recepção" }];
 const functionTypeOptions: { id: FunctionTypeId; label: string }[] = [{ id: 1, label: "Condutor" }, { id: 2, label: "Conduzido" }, { id: 3, label: "Duas funções" }];
@@ -411,12 +412,12 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const candidatesFor = (date: string, type: number, classId: number | null) => {
     if (type === ASSIGNMENT_TYPES.reception) {
       const scheduled = scheduledFor(date, true);
-      return [...scheduled.filter(person => isPersonType(person, "reception")), ...scheduled.filter(person => !isPersonType(person, "reception") && hasCapability(person.id, CAPABILITIES.coverReception))];
+      return [...scheduled.filter(person => isPersonType(person, "reception")), ...scheduled.filter(person => !isPersonType(person, "reception") && (RECEPTION_PRIORITY_PERSON_IDS.includes(person.id) || hasCapability(person.id, CAPABILITIES.coverReception)))];
     }
     const scheduled = scheduledFor(date);
     return type === ASSIGNMENT_TYPES.lead && classId === 3 ? scheduled.filter(person => hasCapability(person.id, CAPABILITIES.leadBlack)) : scheduled;
   };
-  const requiredSlots = days.flatMap(date => [...classSlots.flatMap(classType => [{ date, type: ASSIGNMENT_TYPES.lead, classId: classType.id }, { date, type: ASSIGNMENT_TYPES.sound, classId: classType.id }]), { date, type: ASSIGNMENT_TYPES.reception, classId: null }]);
+  const requiredSlots = days.flatMap(date => [{ date, type: ASSIGNMENT_TYPES.reception, classId: null }, ...classSlots.flatMap(classType => [{ date, type: ASSIGNMENT_TYPES.lead, classId: classType.id }, { date, type: ASSIGNMENT_TYPES.sound, classId: classType.id }])]);
   const missingCount = requiredSlots.filter(slot => !assignmentFor(slot.date, slot.type, slot.classId)).length;
   const conflictCount = assignments.filter(assignment => absences.some(absence => absence.date === assignment.date && absence.person_id === assignment.person_id)).length;
 
@@ -436,7 +437,8 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     assignments.forEach(item => { const set = occupied.get(item.date) ?? new Set<number>(); set.add(item.person_id); occupied.set(item.date, set); });
     const choose = (date: string, type: number, classId: number | null) => {
       const daily = occupied.get(date) ?? new Set<number>();
-      const available = candidatesFor(date, type, classId).filter(person => !daily.has(person.id)).sort((a,b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0) || a.name.localeCompare(b.name));
+      const receptionPriority = (person: PersonRow) => isPersonType(person, "reception") ? 0 : RECEPTION_PRIORITY_PERSON_IDS.includes(person.id) ? 1 : 2;
+      const available = candidatesFor(date, type, classId).filter(person => !daily.has(person.id)).sort((a,b) => (type === ASSIGNMENT_TYPES.reception ? receptionPriority(a) - receptionPriority(b) : 0) || (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0) || a.name.localeCompare(b.name));
       const person = available[0];
       if (!person) return null;
       daily.add(person.id); occupied.set(date, daily); counts.set(person.id, (counts.get(person.id) ?? 0) + 1);
