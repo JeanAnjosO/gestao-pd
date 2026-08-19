@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, isValidElement, useEffect, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { supabase } from "./supabase";
 
@@ -26,6 +26,7 @@ type CalendarPeriodRow = { id: number; year: number; month: number; status: "dra
 type CalendarAssignmentRow = { id: number; date: string; assignment_type_id: 1 | 2 | 3; class_type_id: 1 | 2 | 3 | null; person_id: number; manually_assigned: boolean };
 type CalendarNoteRow = { id: number; date: string; note: string };
 type CapabilityRow = { person_id: number; capability_type_id: 1 | 2 };
+type CompensationRateRow = { unit_id: number; level_code: number; half_day_amount: number; full_day_amount: number; fixed_daily_amount: number; hourly_amount: number };
 const PERSON_TYPES = { manager: 1, teacher: 2, intern: 3, reception: 4 } as const;
 const FUNCTION_TYPES = { conductor: 1, follower: 2, both: 3 } as const;
 const CALENDAR_MODES = { simple: 1, colors: 2 } as const;
@@ -34,6 +35,7 @@ const CLASS_TYPES = [{ id: 3 as const, label: "Preta", code: "black" }, { id: 2 
 const CAPABILITIES = { coverReception: 1, leadBlack: 2 } as const;
 const RECEPTION_PRIORITY_PERSON_IDS = [1, 2, 3, 4];
 const CALENDAR_TEAM_RELEASE_AT = new Date("2026-09-01T00:00:00-03:00").getTime();
+const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 const personTypeOptions: { id: PersonTypeId; label: string }[] = [{ id: 1, label: "Gestor" }, { id: 2, label: "Professor" }, { id: 3, label: "Estagiário" }, { id: 4, label: "Recepção" }];
 const functionTypeOptions: { id: FunctionTypeId; label: string }[] = [{ id: 1, label: "Condutor" }, { id: 2, label: "Conduzido" }, { id: 3, label: "Duas funções" }];
 const isPersonType = (person: Pick<PersonRow, "person_type_id"> | Pick<Profile, "person_type_id">, type: keyof typeof PERSON_TYPES) => person.person_type_id === PERSON_TYPES[type];
@@ -813,6 +815,7 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
   const [viewMonth, setViewMonth] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
   const [absences, setAbsences] = useState<AbsenceRow[]>([]);
   const [overrides, setOverrides] = useState<DailyOverrideRow[]>([]);
+  const [rates, setRates] = useState<CompensationRateRow[]>([]);
   const [periodStatus, setPeriodStatus] = useState("open");
   const year = viewMonth.getFullYear();
   const month = viewMonth.getMonth();
@@ -822,19 +825,27 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
   useEffect(() => {
     if (!unitId) return;
     const loadReport = async () => {
-      const [{ data: absenceData }, { data: overrideData }, { data: periodData }] = await Promise.all([
+      const [{ data: absenceData }, { data: overrideData }, { data: periodData }, { data: rateData }] = await Promise.all([
         supabase.from("absences").select("id,date,person_id,created_by,created_at").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
         supabase.from("daily_overrides").select("id,date,person_id,daily_type,created_by").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
         supabase.from("monthly_periods").select("status").eq("unit_id", unitId).eq("year", year).eq("month", month + 1).limit(1),
+        supabase.from("unit_compensation_rates").select("unit_id,level_code,half_day_amount,full_day_amount,fixed_daily_amount,hourly_amount").eq("unit_id", unitId),
       ]);
       setAbsences((absenceData ?? []) as AbsenceRow[]);
       setOverrides((overrideData ?? []) as DailyOverrideRow[]);
       setPeriodStatus(periodData?.[0]?.status ?? "open");
+      setRates((rateData ?? []).map(item => ({ ...item, half_day_amount: Number(item.half_day_amount), full_day_amount: Number(item.full_day_amount), fixed_daily_amount: Number(item.fixed_daily_amount), hourly_amount: Number(item.hourly_amount) })) as CompensationRateRow[]);
     };
     void loadReport();
   }, [unitId, monthStart, monthEnd, year, month]);
   const reportPeople = people.filter(person => !isPersonType(person, "manager"));
   const days = Array.from({ length: new Date(year, month + 1, 0).getDate() }, (_, index) => `${prefix}-${String(index + 1).padStart(2,"0")}`);
+  const paymentCell = (dailyAmount: number, soloAmount: number, halfCount: number, fullCount: number, fixedCount: number, soloCount: number) => {
+    const total = dailyAmount + soloAmount;
+    const dailyDetail = fixedCount ? `${fixedCount} diária(s) de estágio: ${formatCurrency(dailyAmount)}` : `${halfCount} meia(s) + ${fullCount} completa(s): ${formatCurrency(dailyAmount)}`;
+    const soloDetail = `${soloCount} aula(s) solo (30% da hora avulsa): ${formatCurrency(soloAmount)}`;
+    return <span className="payment-value" tabIndex={0} title={`${dailyDetail} | ${soloDetail} | Total: ${formatCurrency(total)}`} data-sort-value={total} aria-label={`Total ${formatCurrency(total)}. ${dailyDetail}. ${soloDetail}.`}><strong>{formatCurrency(total)}</strong><span className="payment-breakdown" role="tooltip"><b>{dailyDetail}</b><b>{soloDetail}</b><em>Total: {formatCurrency(total)}</em></span></span>;
+  };
   const rows = reportPeople.map(person => {
     let total = 0;
     let complete = 0;
@@ -843,15 +854,17 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
       const weekday = new Date(`${date}T12:00:00`).getDay();
       return schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) && !absences.some(absence => absence.person_id === person.id && absence.date === date);
     });
+    const dailyTypes: string[] = [];
     scheduledDays.forEach(date => {
       const weekday = new Date(`${date}T12:00:00`).getDay();
       const schedule = schedules.find(item => item.person_id === person.id && item.weekday === weekday && scheduleAppliesOn(item, date));
       const type = overrides.find(item => item.person_id === person.id && item.date === date)?.daily_type ?? schedule?.daily_type;
+      dailyTypes.push(type ?? "half");
       total += 1;
       if (type === "full") complete += 1;
     });
     const personSubstitutions = substitutions.filter(item => item.substitute_person_id === person.id && item.date.startsWith(prefix) && unitIsOpenOn(item.date, openingDays, operationExceptions));
-    personSubstitutions.forEach(item => { total += 1; if (item.daily_type === "full") complete += 1; });
+    personSubstitutions.forEach(item => { dailyTypes.push(item.daily_type); total += 1; if (item.daily_type === "full") complete += 1; });
     const baseIsHalf = schedules.some(item => item.person_id === person.id && item.daily_type === "half" && scheduleAppliesOn(item, monthEnd));
     const totalLabel = baseIsHalf && complete ? `${total}, ${complete} comp` : String(total);
     const approvedSolo = soloRows.filter(item => item.teacher_id === person.id && item.status === "approved" && item.date.startsWith(prefix)).length;
@@ -860,16 +873,25 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     const halfSubs = personSubstitutions.length - fullSubs;
     const substitutionLabel = !personSubstitutions.length ? "—" : fullSubs && halfSubs ? `${personSubstitutions.length} (${fullSubs} comp)` : fullSubs ? `${fullSubs} comp` : `${halfSubs} meia`;
     const functionLabel = isPersonType(person, "teacher") ? "Professor(a)" : isPersonType(person, "reception") ? "Recepção" : "Estagiário(a)";
-    return [displayName(person), totalLabel, functionLabel, personLevelLabel(person), String(absenceCount), isPersonType(person, "teacher") ? String(approvedSolo) : "—", substitutionLabel];
+    const rate = rates.find(item => item.level_code === (isPersonType(person, "intern") ? 0 : person.level));
+    const halfCount = dailyTypes.filter(type => type === "half").length;
+    const fullCount = dailyTypes.filter(type => type === "full").length;
+    const fixedCount = isPersonType(person, "intern") ? dailyTypes.length : 0;
+    const dailyAmount = fixedCount ? fixedCount * (rate?.fixed_daily_amount ?? 0) : halfCount * (rate?.half_day_amount ?? 0) + fullCount * (rate?.full_day_amount ?? 0);
+    const soloAmount = isPersonType(person, "teacher") ? approvedSolo * (rate?.hourly_amount ?? 0) * 0.3 : 0;
+    return [displayName(person), totalLabel, functionLabel, personLevelLabel(person), String(absenceCount), isPersonType(person, "teacher") ? String(approvedSolo) : "—", substitutionLabel, paymentCell(dailyAmount, soloAmount, halfCount, fullCount, fixedCount, approvedSolo)];
   });
   const externalRows = Array.from(new Set(substitutions.filter(item => !item.substitute_person_id && item.external_name && item.date.startsWith(prefix) && unitIsOpenOn(item.date, openingDays, operationExceptions)).map(item => item.external_name!.trim()))).map(name => {
     const records = substitutions.filter(item => !item.substitute_person_id && item.external_name?.trim() === name && item.date.startsWith(prefix) && unitIsOpenOn(item.date, openingDays, operationExceptions));
     const full = records.filter(item => item.daily_type === "full").length;
     const level = records.find(item => item.external_level)?.external_level;
-    return [name, full ? `${records.length}, ${full} comp` : String(records.length), "Substituto externo", level ? `Nível ${level}` : "—", "0", "—", full === records.length ? `${full} comp` : `${records.length} (${full} comp)`];
+    const half = records.length - full;
+    const rate = rates.find(item => item.level_code === level);
+    const dailyAmount = half * (rate?.half_day_amount ?? 0) + full * (rate?.full_day_amount ?? 0);
+    return [name, full ? `${records.length}, ${full} comp` : String(records.length), "Substituto externo", level ? `Nível ${level}` : "—", "0", "—", full === records.length ? `${full} comp` : `${records.length} (${full} comp)`, paymentCell(dailyAmount, 0, half, full, 0, 0)];
   });
   const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(viewMonth);
-  return <><Title title="Relatório mensal" text="Resumo objetivo de professores e recepção. Gestores não são contabilizados." /><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={1} headers={["Pessoa","Total de diárias","Função","Nível","Faltas","Aulas solo","Substituições"]} rows={[...rows, ...externalRows]} /></>;
+  return <><Title title="Relatório mensal" text="Resumo objetivo de professores e recepção. Gestores não são contabilizados." /><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={7} headers={["Pessoa","Total de diárias","Função","Nível","Faltas","Aulas solo","Substituições","Valor"]} rows={[...rows, ...externalRows]} /></>;
 }
 
 function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays, setOpeningDays, operationExceptions, setOperationExceptions, people, setPeople, schedules, setSchedules, soloRows }: { profile: Profile; unitId: number | null; units: UnitRow[]; setUnits: (v: UnitRow[]) => void; selectUnit: (v: number) => void; openingDays: boolean[]; setOpeningDays: (v: boolean[]) => void; operationExceptions: OperationExceptionRow[]; setOperationExceptions: (v: OperationExceptionRow[]) => void; people: PersonRow[]; setPeople: (v: PersonRow[]) => void; schedules: ScheduleRow[]; setSchedules: (v: ScheduleRow[]) => void; soloRows: SoloRow[] }) {
@@ -896,6 +918,9 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
   const [unitBusy, setUnitBusy] = useState(false);
   const [directoryPeople, setDirectoryPeople] = useState<PersonRow[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityRow[]>([]);
+  const [compensationRates, setCompensationRates] = useState<CompensationRateRow[]>([]);
+  const [rateMessage, setRateMessage] = useState("");
+  const [rateBusy, setRateBusy] = useState(false);
   const [membershipBusy, setMembershipBusy] = useState<number | null>(null);
   const [editingUnitId, setEditingUnitId] = useState<number | null>(null);
   useEffect(() => {
@@ -917,16 +942,31 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
   }, [unitId]);
   useEffect(() => {
     const loadDirectory = async () => {
-      const [{ data }, { data: capabilityData }] = await Promise.all([
+      const [{ data }, { data: capabilityData }, { data: rateData }] = await Promise.all([
         supabase.from("people").select("id,name,nickname,username,person_type_id,access_role_type_id,function_type_id,level,active,auth_user_id").order("name"),
         supabase.from("person_operational_capabilities").select("person_id,capability_type_id"),
+        unitId ? supabase.from("unit_compensation_rates").select("unit_id,level_code,half_day_amount,full_day_amount,fixed_daily_amount,hourly_amount").eq("unit_id", unitId).order("level_code") : Promise.resolve({ data: [] }),
       ]);
       if (data) setDirectoryPeople(data as PersonRow[]);
       if (capabilityData) setCapabilities(capabilityData as CapabilityRow[]);
+      if (rateData) setCompensationRates((rateData as CompensationRateRow[]).map(item => ({ ...item, half_day_amount: Number(item.half_day_amount), full_day_amount: Number(item.full_day_amount), fixed_daily_amount: Number(item.fixed_daily_amount), hourly_amount: Number(item.hourly_amount) })));
     };
     void loadDirectory();
   }, [unitId]);
   const toggleDay = async (index: number) => { if (!unitId) return; const next = !openingDays[index]; const { error } = await supabase.from("unit_open_days").upsert({ unit_id: unitId, weekday: index, open: next }, { onConflict: "unit_id,weekday" }); if (!error) setOpeningDays(openingDays.map((v, i) => i === index ? next : v)); };
+  const updateRateValue = (levelCode: number, field: "half_day_amount" | "full_day_amount" | "fixed_daily_amount" | "hourly_amount", value: number) => setCompensationRates(current => {
+    const existing = current.find(item => item.level_code === levelCode) ?? { unit_id: unitId ?? 0, level_code: levelCode, half_day_amount: 0, full_day_amount: 0, fixed_daily_amount: 0, hourly_amount: 0 };
+    return [...current.filter(item => item.level_code !== levelCode), { ...existing, [field]: Math.max(0, value || 0) }].sort((a,b) => a.level_code - b.level_code);
+  });
+  const saveCompensationRates = async () => {
+    if (!unitId) return;
+    setRateBusy(true); setRateMessage("");
+    const payload = [0,1,2,3,4].map(levelCode => { const rate = compensationRates.find(item => item.level_code === levelCode); return { unit_id: unitId, level_code: levelCode, half_day_amount: levelCode ? rate?.half_day_amount ?? 0 : 0, full_day_amount: levelCode ? rate?.full_day_amount ?? 0 : 0, fixed_daily_amount: levelCode === 0 ? rate?.fixed_daily_amount ?? 0 : 0, hourly_amount: levelCode ? rate?.hourly_amount ?? 0 : 0, updated_by: profile.id, updated_at: new Date().toISOString() }; });
+    const { data, error } = await supabase.from("unit_compensation_rates").upsert(payload, { onConflict: "unit_id,level_code" }).select("unit_id,level_code,half_day_amount,full_day_amount,fixed_daily_amount,hourly_amount").order("level_code");
+    if (error || !data) setRateMessage("Não foi possível salvar os valores.");
+    else { setCompensationRates((data as CompensationRateRow[]).map(item => ({ ...item, half_day_amount: Number(item.half_day_amount), full_day_amount: Number(item.full_day_amount), fixed_daily_amount: Number(item.fixed_daily_amount), hourly_amount: Number(item.hourly_amount) }))); setRateMessage("Valores de pagamento atualizados."); }
+    setRateBusy(false);
+  };
   const updatePerson = async (person: PersonRow, values: Partial<PersonRow>) => { const { error } = await supabase.from("people").update(values).eq("id", person.id); if (!error) setPeople(people.map(p => p.id === person.id ? { ...p, ...values } : p)); };
   const toggleCapability = async (personId: number, capabilityTypeId: 1 | 2) => {
     const active = capabilities.some(item => item.person_id === personId && item.capability_type_id === capabilityTypeId);
@@ -1090,6 +1130,10 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
       <div className="unit-team-header"><h4>Equipe vinculada</h4><p>Selecione quem terá acesso e fará parte dos cálculos desta unidade.</p></div>
       <div className="unit-members-grid">{directoryPeople.map(person => { const linked = people.some(item => item.id === person.id); const ownAccess = person.id === profile.id; return <label key={person.id} className={linked ? "linked" : ""}><input type="checkbox" checked={linked} disabled={ownAccess || membershipBusy === person.id} onChange={() => toggleUnitMembership(person)} /><span><strong>{displayName(person)}</strong><small>{personTypeOptions.find(option => option.id === person.person_type_id)?.label ?? "Perfil"}{ownAccess ? " · seu acesso" : ""}</small></span></label>; })}</div>
     </div></details>
+    <details className="panel collapsible parameters-values"><summary><div><h3>Valores de pagamento</h3><p>Defina diárias e hora avulsa por nível para esta unidade.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
+      <div className="payment-rate-grid"><div className="payment-rate-row intern-rate"><strong>Estagiário</strong><label>Valor fixo por dia<input type="number" min="0" step="0.01" value={compensationRates.find(item => item.level_code === 0)?.fixed_daily_amount ?? 0} onChange={event => updateRateValue(0, "fixed_daily_amount", Number(event.target.value))} /></label></div>{[1,2,3,4].map(level => { const rate = compensationRates.find(item => item.level_code === level); return <div className="payment-rate-row" key={level}><strong>Nível {level}</strong><label>Meia diária<input type="number" min="0" step="0.01" value={rate?.half_day_amount ?? 0} onChange={event => updateRateValue(level, "half_day_amount", Number(event.target.value))} /></label><label>Diária completa<input type="number" min="0" step="0.01" value={rate?.full_day_amount ?? 0} onChange={event => updateRateValue(level, "full_day_amount", Number(event.target.value))} /></label><label>Hora avulsa<input type="number" min="0" step="0.01" value={rate?.hourly_amount ?? 0} onChange={event => updateRateValue(level, "hourly_amount", Number(event.target.value))} /></label></div>; })}</div>
+      <div className="payment-rate-actions"><small>A aula solo aprovada corresponde automaticamente a 30% da hora avulsa.</small><button type="button" className="primary" disabled={rateBusy || !unitId} onClick={saveCompensationRates}>{rateBusy ? "Salvando…" : "Salvar valores"}</button></div>{rateMessage && <p className="operation-message">{rateMessage}</p>}
+    </div></details>
     <details className="panel collapsible parameters-team"><summary><div><h3>Equipe</h3><p>Cadastre a equipe e ajuste nível e situação.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
       <form action={addPerson} className="solo-form parameter-form"><label>Nome completo<input name="name" required /></label><label>Apelido<input name="nickname" maxLength={40} placeholder="Como aparecerá no sistema" /></label><label>Usuário<input name="username" required /></label><label>Perfil<select name="person_type_id" value={newPersonType} onChange={e => setNewPersonType(Number(e.target.value) as PersonTypeId)}>{personTypeOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><label>Função<select name="function_type_id" value={newPersonType === PERSON_TYPES.reception ? "" : newFunctionType} disabled={newPersonType === PERSON_TYPES.reception} onChange={e => setNewFunctionType(Number(e.target.value) as FunctionTypeId)}><option value="">Não se aplica</option>{functionTypeOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></label><label>Nível<select name="level" disabled={newPersonType === PERSON_TYPES.intern}><option value="1">Nível 1</option><option value="2">Nível 2</option><option value="3">Nível 3</option><option value="4">Nível 4</option></select></label><button className="primary">Adicionar pessoa</button></form>
       <div className="table-wrap team-table"><table><thead><tr><th>Pessoa</th><th>Apelido</th><th>Perfil</th><th>Função</th><th>Nível</th><th>Calendário</th><th>Acesso</th><th>Situação</th></tr></thead><tbody>{people.map(person => <tr key={person.id}><td data-label="Pessoa"><strong>{person.name}</strong><small>@{person.username} · {person.auth_user_id ? "acesso ativo" : "acesso pendente"}</small></td><td data-label="Apelido"><label className="nickname-editor"><span>Nome de exibição</span><input className="nickname-input" defaultValue={person.nickname ?? ""} maxLength={40} placeholder="Adicionar apelido" aria-label={`Apelido de ${person.name}`} onBlur={event => { const nickname = event.target.value.trim() || null; if (nickname !== person.nickname) void updatePerson(person, { nickname }); }} /></label></td><td data-label="Perfil"><select value={person.person_type_id} onChange={e => changeProfile(person, Number(e.target.value) as PersonTypeId)}>{personTypeOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></td><td data-label="Função"><select value={person.function_type_id ?? ""} disabled={isPersonType(person, "reception")} onChange={e => updatePerson(person, { function_type_id: Number(e.target.value) as FunctionTypeId })}><option value="">Não se aplica</option>{functionTypeOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}</select></td><td data-label="Nível">{!isPersonType(person, "intern") ? <select value={person.level ?? 1} onChange={e => updatePerson(person, { level: Number(e.target.value) })}>{[1,2,3,4].filter(n => !isPersonType(person, "reception") || n < 4).map(n => <option key={n} value={n}>Nível {n}</option>)}</select> : "Estagiário(a)"}</td><td data-label="Calendário">{isPersonType(person, "reception") ? <small>Portaria principal</small> : <div className="capability-checks"><label><input type="checkbox" checked={capabilities.some(item => item.person_id === person.id && item.capability_type_id === CAPABILITIES.coverReception)} onChange={() => toggleCapability(person.id, CAPABILITIES.coverReception)} />Cobre Portaria</label><label><input type="checkbox" checked={capabilities.some(item => item.person_id === person.id && item.capability_type_id === CAPABILITIES.leadBlack)} onChange={() => toggleCapability(person.id, CAPABILITIES.leadBlack)} />Puxa Preta</label></div>}</td><td data-label="Acesso">{temporaryAccess?.personId === person.id ? <div className="temporary-password"><input value={temporaryAccess.password} readOnly aria-label={`Senha temporária de ${person.name}`} /><button type="button" className="copy-access" onClick={copyTemporaryPassword} title="Copiar senha" aria-label="Copiar senha"><span aria-hidden="true" /></button>{temporaryAccess.copied && <small>Copiada</small>}</div> : <button type="button" className="access-button" disabled={accessBusy === person.id} onClick={() => manageAccess(person)}>{accessBusy === person.id ? "Gerando…" : person.auth_user_id ? "Redefinir senha" : "Criar acesso"}</button>}{accessError?.personId === person.id && <small className="access-error">{accessError.message}</small>}</td><td data-label="Situação"><button type="button" className={person.active ? "status-button active" : "status-button"} onClick={() => updatePerson(person, { active: !person.active })}>{person.active ? "Ativo" : "Inativo"}</button></td></tr>)}</tbody></table></div>
@@ -1116,4 +1160,4 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
 
 function Title({ title, text, action, onAction, actionDisabled }: { title: string; text: string; action?: string; onAction?: () => void; actionDisabled?: boolean }) { return <div className="title"><div><h2>{title}</h2><p>{text}</p></div>{action && <button type="button" className="primary" onClick={onAction} disabled={actionDisabled}>{action}</button>}</div>; }
 function Stat({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone?: string }) { return <div className={`stat ${tone || ""}`}><small>{label}</small><strong>{value}</strong>{detail && <span>{detail}</span>}</div>; }
-function Table({ headers, rows, highlightColumn, sortable = false }: { headers: string[]; rows: string[][]; highlightColumn?: number; sortable?: boolean }) { const [sort, setSort] = useState<{ column: number; direction: 1 | -1 }>({ column: 0, direction: 1 }); const levelRank = (value: string) => value.toLowerCase().includes("estagi") ? 0 : Number(value.match(/\d+/)?.[0] ?? 99); const sortedRows = sortable ? [...rows].sort((a,b) => { const av = sort.column === 3 ? levelRank(a[sort.column]) : a[sort.column], bv = sort.column === 3 ? levelRank(b[sort.column]) : b[sort.column]; return (typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv), "pt-BR", { numeric: true })) * sort.direction; }) : rows; const toggleSort = (column: number) => setSort(current => current.column === column ? { column, direction: current.direction === 1 ? -1 : 1 } : { column, direction: 1 }); return <div className="table-wrap responsive-card-table">{sortable && <div className="mobile-sort-controls"><label>Ordenar por<select value={sort.column} onChange={event => setSort({ column: Number(event.target.value), direction: 1 })}>{headers.map((header, index) => <option key={header} value={index}>{header}</option>)}</select></label><button type="button" onClick={() => setSort(current => ({ ...current, direction: current.direction === 1 ? -1 : 1 }))}>{sort.direction === 1 ? "Crescente ↑" : "Decrescente ↓"}</button></div>}<table><thead><tr>{headers.map((h, i) => <th className={i === highlightColumn ? "total-column" : ""} key={h}>{sortable ? <button type="button" className="sort-header" onClick={() => toggleSort(i)}>{h}<span>{sort.column === i ? sort.direction === 1 ? "▲" : "▼" : "↕"}</span></button> : h}</th>)}</tr></thead><tbody>{sortedRows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td data-label={headers[j]} className={j === highlightColumn ? "total-column" : ""} key={j}>{cell === "Pendente" || cell === "Aprovada" ? <span className={`pill ${cell === "Pendente" ? "pending" : "approved"}`}>{cell}</span> : cell}</td>)}</tr>)}</tbody></table></div>; }
+function Table({ headers, rows, highlightColumn, sortable = false }: { headers: string[]; rows: (string | React.ReactNode)[][]; highlightColumn?: number; sortable?: boolean }) { const [sort, setSort] = useState<{ column: number; direction: 1 | -1 }>({ column: 0, direction: 1 }); const rawValue = (cell: string | React.ReactNode) => typeof cell === "string" ? cell : isValidElement(cell) ? Number((cell.props as { "data-sort-value"?: number })["data-sort-value"] ?? 0) : 0; const levelRank = (value: string) => value.toLowerCase().includes("estagi") ? 0 : Number(value.match(/\d+/)?.[0] ?? 99); const sortedRows = sortable ? [...rows].sort((a,b) => { const aRaw = rawValue(a[sort.column]), bRaw = rawValue(b[sort.column]); const av = sort.column === 3 ? levelRank(String(aRaw)) : aRaw, bv = sort.column === 3 ? levelRank(String(bRaw)) : bRaw; return (typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv), "pt-BR", { numeric: true })) * sort.direction; }) : rows; const toggleSort = (column: number) => setSort(current => current.column === column ? { column, direction: current.direction === 1 ? -1 : 1 } : { column, direction: 1 }); return <div className="table-wrap responsive-card-table">{sortable && <div className="mobile-sort-controls"><label>Ordenar por<select value={sort.column} onChange={event => setSort({ column: Number(event.target.value), direction: 1 })}>{headers.map((header, index) => <option key={header} value={index}>{header}</option>)}</select></label><button type="button" onClick={() => setSort(current => ({ ...current, direction: current.direction === 1 ? -1 : 1 }))}>{sort.direction === 1 ? "Crescente ↑" : "Decrescente ↓"}</button></div>}<table><thead><tr>{headers.map((h, i) => <th className={i === highlightColumn ? "total-column" : ""} key={h}>{sortable ? <button type="button" className="sort-header" onClick={() => toggleSort(i)}>{h}<span>{sort.column === i ? sort.direction === 1 ? "▲" : "▼" : "↕"}</span></button> : h}</th>)}</tr></thead><tbody>{sortedRows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td data-label={headers[j]} className={j === highlightColumn ? "total-column" : ""} key={j}>{cell === "Pendente" || cell === "Aprovada" ? <span className={`pill ${cell === "Pendente" ? "pending" : "approved"}`}>{cell}</span> : cell}</td>)}</tr>)}</tbody></table></div>; }
