@@ -98,11 +98,10 @@ const saveImageBlob = async (blob: Blob, fileName: string, title: string) => {
 function InstallAppPrompt() {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [visible, setVisible] = useState(false);
-  const [showInstructions, setShowInstructions] = useState(false);
   const isIos = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
   useEffect(() => {
     const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
-    if (standalone || window.localStorage.getItem("gestao-pd-install-dismissed") === "1") return;
+    if (standalone) return;
     const reveal = window.setTimeout(() => setVisible(true), 1200);
     const capture = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPromptEvent); setVisible(true); };
     window.addEventListener("beforeinstallprompt", capture);
@@ -115,15 +114,19 @@ function InstallAppPrompt() {
       const choice = await installPrompt.userChoice;
       if (choice.outcome === "accepted") setVisible(false);
       setInstallPrompt(null);
-    } else setShowInstructions(true);
+      return;
+    }
+    if (isIos && navigator.share) {
+      try { await navigator.share({ title: "Gestão PD", text: "Adicionar o Gestão PD à tela inicial", url: window.location.href }); }
+      catch (error) { if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error); }
+    }
   };
-  const dismiss = () => { window.localStorage.setItem("gestao-pd-install-dismissed", "1"); setVisible(false); };
   return <aside className="install-app-card" aria-label="Instalar Gestão PD">
-    <button type="button" className="install-close" aria-label="Fechar aviso de instalação" onClick={dismiss}>×</button>
+    <button type="button" className="install-close" aria-label="Fechar aviso de instalação" onClick={() => setVisible(false)}>×</button>
     <img src="/icon-192.png" alt="" width="46" height="46" />
     <div><strong>Gestão PD no celular</strong><span>Adicione à tela inicial e abra como um aplicativo.</span></div>
-    <button type="button" className="primary" onClick={install}>Instalar</button>
-    {showInstructions && <div className="install-instructions" role="dialog" aria-label="Como instalar"><strong>{isIos ? "No iPhone" : "No navegador"}</strong><p>{isIos ? <>Toque em <b>Compartilhar</b>, escolha <b>Adicionar à Tela de Início</b>, ative <b>Abrir como App da Web</b> e toque em <b>Adicionar</b>.</> : <>Abra o menu do navegador e escolha <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.</>}</p><button type="button" onClick={() => setShowInstructions(false)}>Entendi</button></div>}
+    <ol className="install-steps">{isIos ? <><li>Toque em <b>Compartilhar</b>.</li><li>Escolha <b>Adicionar à Tela de Início</b>.</li><li>Ative <b>Abrir como App da Web</b> e toque em <b>Adicionar</b>.</li></> : installPrompt ? <><li>Toque em <b>Instalar agora</b>.</li><li>Confirme a instalação no navegador.</li><li>Abra pelo novo ícone na tela inicial.</li></> : <><li>Abra o menu do navegador.</li><li>Escolha <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.</li><li>Confirme e abra pelo novo ícone.</li></>}</ol>
+    <button type="button" className="primary" onClick={install}>{installPrompt ? "Instalar agora" : isIos ? "Abrir compartilhamento" : "Como instalar"}</button>
   </aside>;
 }
 
