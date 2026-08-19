@@ -421,7 +421,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const missingCount = requiredSlots.filter(slot => !assignmentFor(slot.date, slot.type, slot.classId)).length;
   const conflictCount = assignments.filter(assignment => absences.some(absence => absence.date === assignment.date && absence.person_id === assignment.person_id)).length;
 
-  const generateCalendar = async () => {
+  const generateCalendar = async (rebuildFrom?: string) => {
     if (!isManager) return;
     setBusy(true); setMessage("");
     let activePeriod = period;
@@ -430,11 +430,23 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
       if (error || !data) { setMessage("Não foi possível iniciar o calendário deste mês."); setBusy(false); return; }
       activePeriod = data as CalendarPeriodRow; setPeriod(activePeriod);
     }
+    let baseAssignments = assignments;
+    const previousFutureAssignments = rebuildFrom ? assignments.filter(item => item.date >= rebuildFrom && item.date <= end) : [];
+    const slotsToFill = rebuildFrom ? requiredSlots.filter(slot => slot.date >= rebuildFrom) : requiredSlots;
+    if (rebuildFrom) {
+      const { error: deleteError } = await supabase.from("calendar_assignments").delete().eq("unit_id", unit.id).gte("date", rebuildFrom).lte("date", end);
+      if (deleteError) { setMessage("Não foi possível limpar a escala futura para refazê-la."); setBusy(false); return; }
+      baseAssignments = assignments.filter(item => item.date < rebuildFrom);
+      if (activePeriod.status === "published") {
+        const { data: draftData } = await supabase.from("calendar_periods").update({ status: "draft", published_at: null, published_by: null, updated_at: new Date().toISOString() }).eq("id", activePeriod.id).select("id,year,month,status,published_at").single();
+        if (draftData) { activePeriod = draftData as CalendarPeriodRow; setPeriod(activePeriod); }
+      }
+    }
     const counts = new Map<number, number>();
-    assignments.forEach(item => counts.set(item.person_id, (counts.get(item.person_id) ?? 0) + 1));
+    baseAssignments.forEach(item => counts.set(item.person_id, (counts.get(item.person_id) ?? 0) + 1));
     const generated: { unit_id: number; date: string; assignment_type_id: number; class_type_id: number | null; person_id: number; manually_assigned: boolean; created_by: number; updated_by: number }[] = [];
     const occupied = new Map<string, Set<number>>();
-    assignments.forEach(item => { const set = occupied.get(item.date) ?? new Set<number>(); set.add(item.person_id); occupied.set(item.date, set); });
+    baseAssignments.forEach(item => { const set = occupied.get(item.date) ?? new Set<number>(); set.add(item.person_id); occupied.set(item.date, set); });
     const choose = (date: string, type: number, classId: number | null) => {
       const daily = occupied.get(date) ?? new Set<number>();
       const receptionPriority = (person: PersonRow) => isPersonType(person, "reception") ? 0 : RECEPTION_PRIORITY_PERSON_IDS.includes(person.id) ? 1 : 2;
@@ -444,17 +456,29 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
       daily.add(person.id); occupied.set(date, daily); counts.set(person.id, (counts.get(person.id) ?? 0) + 1);
       return person.id;
     };
-    for (const slot of requiredSlots) {
-      if (assignmentFor(slot.date, slot.type, slot.classId)) continue;
+    for (const slot of slotsToFill) {
+      if (baseAssignments.some(item => item.date === slot.date && item.assignment_type_id === slot.type && item.class_type_id === slot.classId)) continue;
       const personId = choose(slot.date, slot.type, slot.classId);
       if (personId) generated.push({ unit_id: unit.id, date: slot.date, assignment_type_id: slot.type, class_type_id: slot.classId, person_id: personId, manually_assigned: false, created_by: profile.id, updated_by: profile.id });
     }
     if (generated.length) {
       const { data, error } = await supabase.from("calendar_assignments").insert(generated).select("id,date,assignment_type_id,class_type_id,person_id,manually_assigned");
-      if (error) setMessage("A geração encontrou um problema. Nenhuma atribuição existente foi alterada.");
-      else { setAssignments([...assignments, ...data as CalendarAssignmentRow[]]); setMessage(`${data.length} atribuições preenchidas. ${requiredSlots.length - assignments.length - data.length > 0 ? "Revise as pendências destacadas." : "Escala completa para revisão."}`); }
-    } else setMessage(missingCount ? "Não há pessoas elegíveis suficientes para preencher as pendências." : "A escala já está completa.");
+      if (error) {
+        if (rebuildFrom && previousFutureAssignments.length) await supabase.from("calendar_assignments").insert(previousFutureAssignments.map(item => ({ unit_id: unit.id, date: item.date, assignment_type_id: item.assignment_type_id, class_type_id: item.class_type_id, person_id: item.person_id, manually_assigned: item.manually_assigned, created_by: profile.id, updated_by: profile.id })));
+        setAssignments(assignments); setMessage(rebuildFrom ? "Não foi possível refazer o calendário; a escala anterior foi restaurada." : "A geração encontrou um problema. Nenhuma atribuição existente foi alterada.");
+      }
+      else { setAssignments([...baseAssignments, ...data as CalendarAssignmentRow[]]); setMessage(rebuildFrom ? `Calendário refeito a partir de ${rebuildFrom.split("-").reverse().join("/")}. Revise e publique novamente.` : `${data.length} atribuições preenchidas. ${requiredSlots.length - baseAssignments.length - data.length > 0 ? "Revise as pendências destacadas." : "Escala completa para revisão."}`); }
+    } else { setAssignments(baseAssignments); setMessage(rebuildFrom ? "O calendário futuro foi limpo, mas não há pessoas elegíveis suficientes para preenchê-lo." : missingCount ? "Não há pessoas elegíveis suficientes para preencher as pendências." : "A escala já está completa."); }
     setBusy(false);
+  };
+
+  const rebuildCalendar = async () => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}`;
+    const rebuildFrom = start > today ? start : today;
+    if (rebuildFrom > end) { setMessage("Esta competência já terminou e não pode ser refeita."); return; }
+    if (!window.confirm(`Refazer todas as atribuições de ${rebuildFrom.split("-").reverse().join("/")} em diante? Os dias anteriores e as observações serão preservados.`)) return;
+    await generateCalendar(rebuildFrom);
   };
 
   const changeAssignment = async (date: string, type: 1 | 2 | 3, classId: 1 | 2 | 3 | null, personId: number) => {
@@ -530,7 +554,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     </div>
     {message && <p className="operation-message calendar-message">{message}</p>}
     {tab === "planning" ? <div className="calendar-planning">
-      {isManager && <div className="calendar-actions panel"><div><strong>{missingCount || conflictCount ? `${missingCount} pendentes · ${conflictCount} afetadas por falta` : "Escala completa"}</strong><small>A geração preserva alterações manuais e observações.</small></div><button className="primary" disabled={busy} onClick={generateCalendar}>{busy ? "Gerando…" : assignments.length ? "Preencher pendências" : "Montar escala do mês"}</button><button disabled={!period || busy} onClick={publishCalendar}>Publicar escala</button></div>}
+      {isManager && <div className="calendar-actions panel"><div><strong>{missingCount || conflictCount ? `${missingCount} pendentes · ${conflictCount} afetadas por falta` : "Escala completa"}</strong><small>Ao refazer, dias anteriores e observações são preservados.</small></div><button className="primary" disabled={busy} onClick={assignments.length ? rebuildCalendar : () => generateCalendar()}>{busy ? "Gerando…" : assignments.length ? "Refazer calendário" : "Montar escala do mês"}</button><button disabled={!period || busy} onClick={publishCalendar}>Publicar escala</button></div>}
       <div className="calendar-days">{days.map(date => <section className={`calendar-day-card ${requiredSlots.some(slot => slot.date === date && !assignmentFor(date, slot.type, slot.classId)) ? "has-pending" : ""} ${assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)) ? "has-conflict" : ""}`} key={date}><header><div><strong>{formatDay(date)}</strong><small>{assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)) ? "Atenção: responsável com falta" : unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples" : "3 turmas"}</small></div>{isManager ? <input maxLength={240} defaultValue={notes.find(item => item.date === date)?.note ?? ""} placeholder="Observação do dia" onBlur={event => saveNote(date, event.target.value)} /> : <span>{notes.find(item => item.date === date)?.note || "Sem observação"}</span>}</header><div className="calendar-day-rows">{classSlots.map(classType => <div className={`calendar-duty-row class-${classType.code}`} key={classType.id ?? "simple"}>{classType.id && <span className="class-marker">{classType.label}</span>}<label><small>Roda</small>{isManager ? selectFor(date, 1, classType.id) : <strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong>}</label><label><small>Som</small>{isManager ? selectFor(date, 2, classType.id) : <strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong>}</label></div>)}</div><div className="calendar-reception"><small>Portaria</small>{isManager ? selectFor(date, 3, null) : <strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong>}</div></section>)}</div>
     </div> : <div className="calendar-board-area">
       <div className="board-controls panel"><label>Período<select value={range} onChange={event => setRange(event.target.value as typeof range)}><option value="first">1º quadro · até a 2ª sexta</option><option value="second">2º quadro · restante do mês</option><option value="month">Mês completo</option></select></label><button onClick={() => exportImage(false)} disabled={busy}>Baixar imagem</button><button className="primary" onClick={() => exportImage(true)} disabled={busy}>Compartilhar</button><button onClick={() => window.print()}>Imprimir / PDF</button></div>
