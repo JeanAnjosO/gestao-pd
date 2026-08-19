@@ -437,6 +437,8 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
       const { error: deleteError } = await supabase.from("calendar_assignments").delete().eq("unit_id", unit.id).gte("date", rebuildFrom).lte("date", end);
       if (deleteError) { setMessage("Não foi possível limpar a escala futura para refazê-la."); setBusy(false); return; }
       baseAssignments = assignments.filter(item => item.date < rebuildFrom);
+      setAssignments(baseAssignments);
+      await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
       if (activePeriod.status === "published") {
         const { data: draftData } = await supabase.from("calendar_periods").update({ status: "draft", published_at: null, published_by: null, updated_at: new Date().toISOString() }).eq("id", activePeriod.id).select("id,year,month,status,published_at").single();
         if (draftData) { activePeriod = draftData as CalendarPeriodRow; setPeriod(activePeriod); }
@@ -458,7 +460,9 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
         const drawPool = fixedReception.length ? fixedReception : priorityGroup.length ? priorityGroup : remainingGroup;
         person = drawPool[Math.floor(Math.random() * drawPool.length)];
       } else {
-        person = available.sort((a,b) => (counts.get(a.id) ?? 0) - (counts.get(b.id) ?? 0) || a.name.localeCompare(b.name))[0];
+        const lowestCount = available.length ? Math.min(...available.map(item => counts.get(item.id) ?? 0)) : 0;
+        const balancedPool = available.filter(item => (counts.get(item.id) ?? 0) === lowestCount);
+        person = balancedPool[Math.floor(Math.random() * balancedPool.length)];
       }
       if (!person) return null;
       daily.add(person.id); occupied.set(date, daily); counts.set(person.id, (counts.get(person.id) ?? 0) + 1);
