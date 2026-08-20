@@ -29,6 +29,7 @@ type CapabilityRow = { person_id: number; capability_type_id: 1 | 2 };
 type CompensationRateRow = { unit_id: number; level_code: number; half_day_amount: number; full_day_amount: number; fixed_daily_amount: number; hourly_amount: number };
 type PasswordRecoveryRow = { id: number; person_id: number; username_snapshot: string; requested_at: string; expires_at: string; status: "pending" | "completed" | "cancelled" };
 type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
+declare const __APP_RELEASE__: string;
 const PERSON_TYPES = { manager: 1, teacher: 2, intern: 3, reception: 4 } as const;
 const FUNCTION_TYPES = { conductor: 1, follower: 2, both: 3 } as const;
 const CALENDAR_MODES = { simple: 1, colors: 2 } as const;
@@ -37,8 +38,12 @@ const CLASS_TYPES = [{ id: 3 as const, label: "Preta", code: "black" }, { id: 2 
 const CAPABILITIES = { coverReception: 1, leadBlack: 2 } as const;
 const ADMIN_ACCESS_ROLE_ID = 5;
 const RECEPTION_PRIORITY_PERSON_IDS = [1, 2, 3, 4];
-const SESSION_TTL_MS = 10 * 60 * 1000;
-const SESSION_STARTED_KEY = "gestao-pd-session-start";
+const WEB_INACTIVITY_MS = 10 * 60 * 1000;
+const MOBILE_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
+const APP_RELEASE = __APP_RELEASE__;
+const SESSION_ACTIVITY_KEY = "gestao-pd-session-activity";
+const SESSION_LOGIN_KEY = "gestao-pd-session-login";
+const SESSION_RELEASE_KEY = "gestao-pd-session-release";
 const CALENDAR_TEAM_RELEASE_AT = new Date("2026-09-01T00:00:00-03:00").getTime();
 const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 const personTypeOptions: { id: PersonTypeId; label: string }[] = [{ id: 1, label: "Gestor" }, { id: 2, label: "Professor" }, { id: 3, label: "Estagiário" }, { id: 4, label: "Recepção" }];
@@ -77,6 +82,8 @@ const scheduleAppliesOn = (schedule: ScheduleRow, date: string) => schedule.star
 const unitIsOpenOn = (date: string, openingDays: boolean[], exceptions: OperationExceptionRow[]) => exceptions.find(item => item.date === date)?.open ?? openingDays[new Date(`${date}T12:00:00`).getDay()];
 const personLevelLabel = (person?: PersonRow) => !person ? "—" : isPersonType(person, "intern") ? "Estagiário(a)" : person.level ? `Nível ${person.level}` : "—";
 const displayName = (person?: { name: string; nickname?: string | null } | null) => person?.nickname?.trim() || person?.name || "—";
+const isMobileSession = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || Boolean((navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile);
+const clearSessionMetadata = () => { window.localStorage.removeItem(SESSION_ACTIVITY_KEY); window.localStorage.removeItem(SESSION_LOGIN_KEY); window.localStorage.removeItem(SESSION_RELEASE_KEY); };
 const saveImageBlob = async (blob: Blob, fileName: string, title: string) => {
   const file = new File([blob], fileName, { type: "image/png" });
   const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -161,16 +168,22 @@ export default function Home() {
     const loadProfile = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        const storedStart = Number(window.localStorage.getItem(SESSION_STARTED_KEY));
-        const sessionStart = storedStart || Date.parse(session.user.last_sign_in_at ?? "") || Date.now();
-        if (Date.now() - sessionStart >= SESSION_TTL_MS) {
+        const mobile = isMobileSession();
+        const lastSignIn = Date.parse(session.user.last_sign_in_at ?? "") || Date.now();
+        const storedLogin = Number(window.localStorage.getItem(SESSION_LOGIN_KEY)) || lastSignIn;
+        const storedActivity = Number(window.localStorage.getItem(SESSION_ACTIVITY_KEY)) || lastSignIn;
+        const storedRelease = window.localStorage.getItem(SESSION_RELEASE_KEY);
+        const expired = mobile ? Date.now() - storedLogin >= MOBILE_SESSION_MS || storedRelease !== APP_RELEASE : Date.now() - storedActivity >= WEB_INACTIVITY_MS;
+        if (expired) {
           await supabase.auth.signOut({ scope: "local" });
-          window.localStorage.removeItem(SESSION_STARTED_KEY);
-          setAuthError("Sua sessão expirou. Entre novamente.");
+          clearSessionMetadata();
+          setAuthError(mobile && storedRelease !== APP_RELEASE ? "O aplicativo foi atualizado. Entre novamente." : "Sua sessão expirou. Entre novamente.");
           setAuthReady(true);
           return;
         }
-        window.localStorage.setItem(SESSION_STARTED_KEY, String(sessionStart));
+        window.localStorage.setItem(SESSION_LOGIN_KEY, String(storedLogin));
+        window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(Date.now()));
+        window.localStorage.setItem(SESSION_RELEASE_KEY, APP_RELEASE);
         const { data } = await supabase.from("people").select("id,username,name,nickname,person_type_id,access_role_type_id,function_type_id,level,must_change_password").eq("auth_user_id", session.user.id).single();
         if (data) { setProfile(data as Profile); setRole(toUiRole(data.access_role_type_id as AccessRoleTypeId)); }
       }
@@ -178,22 +191,60 @@ export default function Home() {
     };
     void loadProfile();
     const { data: listener } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_OUT") { window.localStorage.removeItem(SESSION_STARTED_KEY); setProfile(null); }
+      if (event === "SIGNED_OUT") { clearSessionMetadata(); setProfile(null); }
     });
     return () => listener.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
     if (!profile) return;
-    const startedAt = Number(window.localStorage.getItem(SESSION_STARTED_KEY)) || Date.now();
-    window.localStorage.setItem(SESSION_STARTED_KEY, String(startedAt));
-    const remaining = Math.max(0, SESSION_TTL_MS - (Date.now() - startedAt));
-    const timeout = window.setTimeout(async () => {
-      await supabase.auth.signOut({ scope: "local" });
-      window.localStorage.removeItem(SESSION_STARTED_KEY);
-      setProfile(null); setAuthView("login"); setAuthError("Sua sessão expirou após 10 minutos. Entre novamente.");
-    }, remaining);
-    return () => window.clearTimeout(timeout);
+    const mobile = isMobileSession();
+    let timeout: number;
+    let lastRecordedActivity = 0;
+    const expire = async (message: string) => { await supabase.auth.signOut({ scope: "local" }); clearSessionMetadata(); setProfile(null); setAuthView("login"); setAuthError(message); };
+    const scheduleWebExpiry = () => {
+      window.clearTimeout(timeout);
+      const lastActivity = Number(window.localStorage.getItem(SESSION_ACTIVITY_KEY)) || Date.now();
+      timeout = window.setTimeout(() => void expire("Sua sessão expirou após 10 minutos sem uso. Entre novamente."), Math.max(0, WEB_INACTIVITY_MS - (Date.now() - lastActivity)));
+    };
+    const recordActivity = () => {
+      if (mobile || Date.now() - lastRecordedActivity < 3000) return;
+      lastRecordedActivity = Date.now();
+      window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(lastRecordedActivity));
+      scheduleWebExpiry();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      const lastActivity = Number(window.localStorage.getItem(SESSION_ACTIVITY_KEY)) || Date.now();
+      if (Date.now() - lastActivity >= WEB_INACTIVITY_MS) void expire("Sua sessão expirou após 10 minutos sem uso. Entre novamente.");
+      else recordActivity();
+    };
+    const verifyMobileRelease = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const response = await fetch(`/release?time=${Date.now()}`, { cache: "no-store" });
+        const data = await response.json() as { release?: string };
+        if (data.release && data.release !== APP_RELEASE) await expire("O aplicativo foi atualizado. Entre novamente.");
+      } catch { /* A ausência de conexão não encerra uma sessão válida. */ }
+    };
+    if (mobile) {
+      const loginAt = Number(window.localStorage.getItem(SESSION_LOGIN_KEY)) || Date.now();
+      timeout = window.setTimeout(() => void expire("Sua sessão de 7 dias expirou. Entre novamente."), Math.max(0, MOBILE_SESSION_MS - (Date.now() - loginAt)));
+      void verifyMobileRelease();
+      document.addEventListener("visibilitychange", verifyMobileRelease);
+    } else {
+      recordActivity();
+      ["pointerdown", "keydown", "touchstart", "scroll"].forEach(event => window.addEventListener(event, recordActivity, { passive: true }));
+      document.addEventListener("visibilitychange", handleVisibility);
+    }
+    return () => {
+      window.clearTimeout(timeout);
+      if (mobile) document.removeEventListener("visibilitychange", verifyMobileRelease);
+      else {
+        ["pointerdown", "keydown", "touchstart", "scroll"].forEach(event => window.removeEventListener(event, recordActivity));
+        document.removeEventListener("visibilitychange", handleVisibility);
+      }
+    };
   }, [profile]);
 
   useEffect(() => {
@@ -250,7 +301,10 @@ export default function Home() {
     if (error) { setAuthError("Usuário ou senha inválidos."); setAuthBusy(false); return; }
     const { data, error: profileError } = await supabase.from("people").select("id,username,name,nickname,person_type_id,access_role_type_id,function_type_id,level,must_change_password").eq("auth_user_id", authData.user.id).single();
     if (profileError || !data) { await supabase.auth.signOut(); setAuthError("Conta sem perfil de acesso."); setAuthBusy(false); return; }
-    window.localStorage.setItem(SESSION_STARTED_KEY, String(Date.now()));
+    const loginAt = Date.now();
+    window.localStorage.setItem(SESSION_LOGIN_KEY, String(loginAt));
+    window.localStorage.setItem(SESSION_ACTIVITY_KEY, String(loginAt));
+    window.localStorage.setItem(SESSION_RELEASE_KEY, APP_RELEASE);
     setProfile(data as Profile); setRole(toUiRole(data.access_role_type_id as AccessRoleTypeId)); setScreen("visao"); setAuthBusy(false);
   };
 
@@ -307,7 +361,7 @@ export default function Home() {
     return <><main className="login-page"><section className="login-brand"><span>PD</span><h1>Primeiro<br />acesso</h1><p>Crie sua senha definitiva para continuar.</p></section><section className="login-panel"><form action={changePassword}><small>SEGURANÇA DA CONTA</small><h2>Olá, {profile.name.split(" ")[0]}</h2><p>A senha deve ter pelo menos 6 caracteres.</p><label>Nova senha<input name="new_password" type="password" minLength={6} autoComplete="new-password" required /></label><label>Confirmar senha<input name="confirm_password" type="password" minLength={6} autoComplete="new-password" required /></label>{authError && <p className="form-error">{authError}</p>}<button className="primary" disabled={authBusy}>{authBusy ? "Salvando…" : "Definir nova senha"}</button></form></section></main><InstallAppPrompt /></>;
   }
 
-  const logout = async () => { await supabase.auth.signOut({ scope: "local" }); window.localStorage.removeItem(SESSION_STARTED_KEY); setProfile(null); };
+  const logout = async () => { await supabase.auth.signOut({ scope: "local" }); clearSessionMetadata(); setProfile(null); };
   const selectedUnit = units.find(unit => unit.id === unitId);
   const profileDetails = [
     profile.access_role_type_id === ADMIN_ACCESS_ROLE_ID ? "Admin" : null,
