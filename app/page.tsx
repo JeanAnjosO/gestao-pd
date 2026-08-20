@@ -107,6 +107,7 @@ function InstallAppPrompt() {
   const [visible, setVisible] = useState(false);
   const isIos = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
   useEffect(() => {
+    if (!isMobileSession()) return;
     const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
     if (standalone) return;
     const reveal = window.setTimeout(() => setVisible(true), 1200);
