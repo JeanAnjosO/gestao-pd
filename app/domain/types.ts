@@ -1,0 +1,26 @@
+export type Screen = "visao" | "calendario" | "faltas" | "solo" | "substituicoes" | "relatorios" | "parametros";
+export type Role = "gestor" | "professor" | "recepcao";
+export type PersonTypeId = 1 | 2 | 3 | 4;
+export type AccessRoleTypeId = 1 | 2 | 3 | 4 | 5;
+export type FunctionTypeId = 1 | 2 | 3;
+
+export type Profile = { id: number; username: string; name: string; nickname: string | null; person_type_id: PersonTypeId; access_role_type_id: AccessRoleTypeId; function_type_id: FunctionTypeId | null; level: number | null; must_change_password: boolean };
+export type ClassRow = { id: number; name: string; allowed_for_half_day: boolean };
+export type SoloRow = { id: number; date: string; status: string; teacher_id: number; classes: { name: string } | null; people: { name: string; nickname: string | null } | null };
+export type AbsenceRow = { id: number; date: string; person_id: number; created_by: number; created_at: string };
+export type SubstitutionRow = { id: number; date: string; substitute_person_id: number | null; external_name: string | null; external_level: number | null; daily_type: string; created_by: number; people?: { name: string; nickname: string | null } | null };
+export type ManagerDayRow = { id: number; date: string; manager_id: number; created_by: number };
+export type DailyOverrideRow = { id: number; date: string; person_id: number; daily_type: string; created_by: number };
+export type OperationExceptionRow = { id: number; date: string; open: boolean; label: string | null };
+export type MonthlyPeriodRow = { id: number; year: number; month: number; status: "open" | "closed"; closes_at: string; closed_at: string | null; closed_by: number | null; reopened_at: string | null; reopened_by: number | null };
+export type MonthlyPeriodEventRow = { id: number; period_id: number; action: "closed" | "reopened"; actor_id: number | null; automated: boolean; created_at: string };
+export type PersonRow = { id: number; name: string; nickname: string | null; username: string; person_type_id: PersonTypeId; access_role_type_id: AccessRoleTypeId; function_type_id: FunctionTypeId | null; level: number | null; active: boolean; auth_user_id: string | null };
+export type ScheduleRow = { id: number; person_id: number; weekday: number; daily_type: "half" | "full" | "manager_support"; starts_on: string; ends_on: string | null };
+export type UnitRow = { id: number; name: string; minimum_teachers: number; calendar_mode_type_id: 1 | 2; active: boolean };
+export type CalendarPeriodRow = { id: number; year: number; month: number; status: "draft" | "published"; published_at: string | null };
+export type CalendarAssignmentRow = { id: number; date: string; assignment_type_id: 1 | 2 | 3; class_type_id: 1 | 2 | 3 | null; person_id: number; manually_assigned: boolean };
+export type CalendarNoteRow = { id: number; date: string; note: string };
+export type CapabilityRow = { person_id: number; capability_type_id: 1 | 2 };
+export type CompensationRateRow = { unit_id: number; level_code: number; half_day_amount: number; full_day_amount: number; fixed_daily_amount: number; hourly_amount: number };
+export type PasswordRecoveryRow = { id: number; person_id: number; username_snapshot: string; requested_at: string; expires_at: string; status: "pending" | "completed" | "cancelled" };
+export type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };

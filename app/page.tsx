@@ -1,142 +1,14 @@
 "use client";
 
-import { Fragment, isValidElement, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { supabase } from "./supabase";
-
-type Screen = "visao" | "calendario" | "faltas" | "solo" | "substituicoes" | "relatorios" | "parametros";
-type Role = "gestor" | "professor" | "recepcao";
-type PersonTypeId = 1 | 2 | 3 | 4;
-type AccessRoleTypeId = 1 | 2 | 3 | 4 | 5;
-type FunctionTypeId = 1 | 2 | 3;
-type Profile = { id: number; username: string; name: string; nickname: string | null; person_type_id: PersonTypeId; access_role_type_id: AccessRoleTypeId; function_type_id: FunctionTypeId | null; level: number | null; must_change_password: boolean };
-type ClassRow = { id: number; name: string; allowed_for_half_day: boolean };
-type SoloRow = { id: number; date: string; status: string; teacher_id: number; classes: { name: string } | null; people: { name: string; nickname: string | null } | null };
-type AbsenceRow = { id: number; date: string; person_id: number; created_by: number; created_at: string };
-type SubstitutionRow = { id: number; date: string; substitute_person_id: number | null; external_name: string | null; external_level: number | null; daily_type: string; created_by: number; people?: { name: string; nickname: string | null } | null };
-type ManagerDayRow = { id: number; date: string; manager_id: number; created_by: number };
-type DailyOverrideRow = { id: number; date: string; person_id: number; daily_type: string; created_by: number };
-type OperationExceptionRow = { id: number; date: string; open: boolean; label: string | null };
-type MonthlyPeriodRow = { id: number; year: number; month: number; status: "open" | "closed"; closes_at: string; closed_at: string | null; closed_by: number | null; reopened_at: string | null; reopened_by: number | null };
-type MonthlyPeriodEventRow = { id: number; period_id: number; action: "closed" | "reopened"; actor_id: number | null; automated: boolean; created_at: string };
-type PersonRow = { id: number; name: string; nickname: string | null; username: string; person_type_id: PersonTypeId; access_role_type_id: AccessRoleTypeId; function_type_id: FunctionTypeId | null; level: number | null; active: boolean; auth_user_id: string | null };
-type ScheduleRow = { id: number; person_id: number; weekday: number; daily_type: "half" | "full" | "manager_support"; starts_on: string; ends_on: string | null };
-type UnitRow = { id: number; name: string; minimum_teachers: number; calendar_mode_type_id: 1 | 2; active: boolean };
-type CalendarPeriodRow = { id: number; year: number; month: number; status: "draft" | "published"; published_at: string | null };
-type CalendarAssignmentRow = { id: number; date: string; assignment_type_id: 1 | 2 | 3; class_type_id: 1 | 2 | 3 | null; person_id: number; manually_assigned: boolean };
-type CalendarNoteRow = { id: number; date: string; note: string };
-type CapabilityRow = { person_id: number; capability_type_id: 1 | 2 };
-type CompensationRateRow = { unit_id: number; level_code: number; half_day_amount: number; full_day_amount: number; fixed_daily_amount: number; hourly_amount: number };
-type PasswordRecoveryRow = { id: number; person_id: number; username_snapshot: string; requested_at: string; expires_at: string; status: "pending" | "completed" | "cancelled" };
-type InstallPromptEvent = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
-declare const __APP_RELEASE__: string;
-const PERSON_TYPES = { manager: 1, teacher: 2, intern: 3, reception: 4 } as const;
-const FUNCTION_TYPES = { conductor: 1, follower: 2, both: 3 } as const;
-const CALENDAR_MODES = { simple: 1, colors: 2 } as const;
-const ASSIGNMENT_TYPES = { lead: 1, sound: 2, reception: 3 } as const;
-const CLASS_TYPES = [{ id: 3 as const, label: "Preta", code: "black" }, { id: 2 as const, label: "Azul", code: "blue" }, { id: 1 as const, label: "Branca", code: "white" }];
-const CAPABILITIES = { coverReception: 1, leadBlack: 2 } as const;
-const ADMIN_ACCESS_ROLE_ID = 5;
-const RECEPTION_PRIORITY_PERSON_IDS = [1, 2, 3, 4];
-const WEB_INACTIVITY_MS = 10 * 60 * 1000;
-const MOBILE_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
-const APP_RELEASE = __APP_RELEASE__;
-const SESSION_ACTIVITY_KEY = "gestao-pd-session-activity";
-const SESSION_LOGIN_KEY = "gestao-pd-session-login";
-const SESSION_RELEASE_KEY = "gestao-pd-session-release";
-const CALENDAR_TEAM_RELEASE_AT = new Date("2026-09-01T00:00:00-03:00").getTime();
-const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
-const personTypeOptions: { id: PersonTypeId; label: string }[] = [{ id: 1, label: "Gestor" }, { id: 2, label: "Professor" }, { id: 3, label: "Estagiário" }, { id: 4, label: "Recepção" }];
-const functionTypeOptions: { id: FunctionTypeId; label: string }[] = [{ id: 1, label: "Condutor" }, { id: 2, label: "Conduzido" }, { id: 3, label: "Duas funções" }];
-const isPersonType = (person: Pick<PersonRow, "person_type_id"> | Pick<Profile, "person_type_id">, type: keyof typeof PERSON_TYPES) => person.person_type_id === PERSON_TYPES[type];
-const toUiRole = (value: AccessRoleTypeId): Role => value === PERSON_TYPES.manager || value === ADMIN_ACCESS_ROLE_ID ? "gestor" : value === PERSON_TYPES.teacher ? "professor" : "recepcao";
-
-const labels: Record<Screen, string> = {
-  visao: "Visão geral",
-  calendario: "Calendário",
-  faltas: "Faltas",
-  solo: "Aulas solo",
-  substituicoes: "Substituições",
-  relatorios: "Relatórios",
-  parametros: "Parâmetros",
-};
-const menuIcons: Record<Screen, string> = { visao: "▦", calendario: "□", faltas: "✕", solo: "", substituicoes: "⇄", relatorios: "▤", parametros: "⚙" };
-
-const menus: Record<Role, Screen[]> = {
-  gestor: ["visao", "calendario", "faltas", "solo", "substituicoes", "relatorios", "parametros"],
-  professor: ["visao", "calendario", "faltas", "solo"],
-  recepcao: ["visao", "calendario", "faltas"],
-};
-
-const week = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
-const firstBusinessDayOfCurrentMonth = () => {
-  const now = new Date();
-  const day = new Date(now.getFullYear(), now.getMonth(), 1);
-  while (day.getDay() === 0 || day.getDay() === 6) day.setDate(day.getDate() + 1);
-  const year = day.getFullYear();
-  const month = String(day.getMonth() + 1).padStart(2, "0");
-  const date = String(day.getDate()).padStart(2, "0");
-  return `${year}-${month}-${date}`;
-};
-const scheduleAppliesOn = (schedule: ScheduleRow, date: string) => schedule.starts_on.slice(0,7) <= date.slice(0,7) && (!schedule.ends_on || schedule.ends_on >= date);
-const unitIsOpenOn = (date: string, openingDays: boolean[], exceptions: OperationExceptionRow[]) => exceptions.find(item => item.date === date)?.open ?? openingDays[new Date(`${date}T12:00:00`).getDay()];
-const personLevelLabel = (person?: PersonRow) => !person ? "—" : isPersonType(person, "intern") ? "Estagiário(a)" : person.level ? `Nível ${person.level}` : "—";
-const displayName = (person?: { name: string; nickname?: string | null } | null) => person?.nickname?.trim() || person?.name || "—";
-const isMobileSession = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || Boolean((navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile);
-const clearSessionMetadata = () => { window.localStorage.removeItem(SESSION_ACTIVITY_KEY); window.localStorage.removeItem(SESSION_LOGIN_KEY); window.localStorage.removeItem(SESSION_RELEASE_KEY); };
-const saveImageBlob = async (blob: Blob, fileName: string, title: string) => {
-  const file = new File([blob], fileName, { type: "image/png" });
-  const isAppleMobile = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  if (isAppleMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title }); } catch (error) { if (!(error instanceof DOMException && error.name === "AbortError")) throw error; }
-    return;
-  }
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.download = fileName;
-  link.href = url;
-  link.style.display = "none";
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
-};
-
-function InstallAppPrompt() {
-  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
-  const [visible, setVisible] = useState(false);
-  const isIos = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
-  useEffect(() => {
-    if (!isMobileSession()) return;
-    const standalone = window.matchMedia("(display-mode: standalone)").matches || Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
-    if (standalone) return;
-    const reveal = window.setTimeout(() => setVisible(true), 1200);
-    const capture = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPromptEvent); setVisible(true); };
-    window.addEventListener("beforeinstallprompt", capture);
-    return () => { window.clearTimeout(reveal); window.removeEventListener("beforeinstallprompt", capture); };
-  }, []);
-  if (!visible) return null;
-  const install = async () => {
-    if (installPrompt) {
-      await installPrompt.prompt();
-      const choice = await installPrompt.userChoice;
-      if (choice.outcome === "accepted") setVisible(false);
-      setInstallPrompt(null);
-      return;
-    }
-    if (isIos && navigator.share) {
-      try { await navigator.share({ title: "Gestão PD", text: "Adicionar o Gestão PD à tela inicial", url: window.location.href }); }
-      catch (error) { if (!(error instanceof DOMException && error.name === "AbortError")) console.error(error); }
-    }
-  };
-  return <aside className="install-app-card" aria-label="Instalar Gestão PD">
-    <button type="button" className="install-close" aria-label="Fechar aviso de instalação" onClick={() => setVisible(false)}>×</button>
-    <img src="/icon-192.png" alt="" width="46" height="46" />
-    <div><strong>Gestão PD no celular</strong><span>Adicione à tela inicial e abra como um aplicativo.</span></div>
-    <ol className="install-steps">{isIos ? <><li>Toque em <b>Compartilhar</b>.</li><li>Escolha <b>Adicionar à Tela de Início</b>.</li><li>Ative <b>Abrir como App da Web</b> e toque em <b>Adicionar</b>.</li></> : installPrompt ? <><li>Toque em <b>Instalar agora</b>.</li><li>Confirme a instalação no navegador.</li><li>Abra pelo novo ícone na tela inicial.</li></> : <><li>Abra o menu do navegador.</li><li>Escolha <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.</li><li>Confirme e abra pelo novo ícone.</li></>}</ol>
-    <button type="button" className="primary" onClick={install}>{installPrompt ? "Instalar agora" : isIos ? "Abrir compartilhamento" : "Como instalar"}</button>
-  </aside>;
-}
+import { InstallAppPrompt } from "./components/InstallAppPrompt";
+import { Stat, Table, Title } from "./components/ui";
+import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteRow, CalendarPeriodRow, CapabilityRow, ClassRow, CompensationRateRow, DailyOverrideRow, FunctionTypeId, ManagerDayRow, MonthlyPeriodEventRow, MonthlyPeriodRow, OperationExceptionRow, PasswordRecoveryRow, PersonRow, PersonTypeId, Profile, Role, ScheduleRow, Screen, SoloRow, SubstitutionRow, UnitRow } from "./domain/types";
+import { ADMIN_ACCESS_ROLE_ID, APP_RELEASE, ASSIGNMENT_TYPES, CALENDAR_MODES, CALENDAR_TEAM_RELEASE_AT, CAPABILITIES, CLASS_TYPES, FUNCTION_TYPES, MOBILE_SESSION_MS, menus, menuIcons, PERSON_TYPES, RECEPTION_PRIORITY_PERSON_IDS, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY, WEB_INACTIVITY_MS, functionTypeOptions, labels, personTypeOptions, week } from "./domain/constants";
+import { clearSessionMetadata, displayName, firstBusinessDayOfCurrentMonth, formatCurrency, isMobileSession, isPersonType, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
+import { chooseCalendarPerson } from "./domain/calendar";
 
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -611,30 +483,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     const counts = new Map<number, number>();
     baseAssignments.forEach(item => counts.set(item.person_id, (counts.get(item.person_id) ?? 0) + 1));
     const generated: { unit_id: number; date: string; assignment_type_id: number; class_type_id: number | null; person_id: number; manually_assigned: boolean; created_by: number; updated_by: number }[] = [];
-    const choose = (date: string, type: number, classId: number | null) => {
-      const assignedSoFar = [...baseAssignments, ...generated].filter(item => item.date === date);
-      const unavailable = new Set(assignedSoFar.filter(item => type === ASSIGNMENT_TYPES.reception || item.assignment_type_id === ASSIGNMENT_TYPES.reception || item.class_type_id === classId).map(item => item.person_id));
-      const available = candidatesFor(date, type, classId).filter(person => !unavailable.has(person.id));
-      let person: PersonRow | undefined;
-      if (type === ASSIGNMENT_TYPES.reception) {
-        const fixedReception = available.filter(item => isPersonType(item, "reception"));
-        const priorityGroup = available.filter(item => !isPersonType(item, "reception") && RECEPTION_PRIORITY_PERSON_IDS.includes(item.id));
-        const remainingGroup = available.filter(item => !isPersonType(item, "reception") && !RECEPTION_PRIORITY_PERSON_IDS.includes(item.id));
-        const drawPool = fixedReception.length ? fixedReception : priorityGroup.length ? priorityGroup : remainingGroup;
-        person = drawPool[Math.floor(Math.random() * drawPool.length)];
-      } else {
-        const classIndex = classSlots.findIndex(item => item.id === classId);
-        const previousClassId = classIndex > 0 ? classSlots[classIndex - 1].id : undefined;
-        const previousPersonId = previousClassId === undefined ? undefined : assignedSoFar.find(item => item.assignment_type_id === type && item.class_type_id === previousClassId)?.person_id;
-        const rotationPool = available.some(item => item.id !== previousPersonId) ? available.filter(item => item.id !== previousPersonId) : available;
-        const lowestCount = rotationPool.length ? Math.min(...rotationPool.map(item => counts.get(item.id) ?? 0)) : 0;
-        const balancedPool = rotationPool.filter(item => (counts.get(item.id) ?? 0) === lowestCount);
-        person = balancedPool[Math.floor(Math.random() * balancedPool.length)];
-      }
-      if (!person) return null;
-      counts.set(person.id, (counts.get(person.id) ?? 0) + 1);
-      return person.id;
-    };
+    const choose = (date: string, type: number, classId: number | null) => chooseCalendarPerson({ date, type, classId, existingAssignments: baseAssignments, generatedAssignments: generated, candidates: candidatesFor(date, type, classId), classSlots, counts });
     for (const slot of slotsToFill) {
       if (baseAssignments.some(item => item.date === slot.date && item.assignment_type_id === slot.type && item.class_type_id === slot.classId)) continue;
       const personId = choose(slot.date, slot.type, slot.classId);
@@ -1386,7 +1235,3 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
     </div></details>
     </>;
 }
-
-function Title({ title, text, action, onAction, actionDisabled }: { title: string; text: string; action?: string; onAction?: () => void; actionDisabled?: boolean }) { return <div className="title"><div><h2>{title}</h2><p>{text}</p></div>{action && <button type="button" className="primary" onClick={onAction} disabled={actionDisabled}>{action}</button>}</div>; }
-function Stat({ label, value, detail, tone }: { label: string; value: string; detail?: string; tone?: string }) { return <div className={`stat ${tone || ""}`}><small>{label}</small><strong>{value}</strong>{detail && <span>{detail}</span>}</div>; }
-function Table({ headers, rows, highlightColumn, blueColumns = [], sortable = false }: { headers: string[]; rows: (string | React.ReactNode)[][]; highlightColumn?: number; blueColumns?: number[]; sortable?: boolean }) { const [sort, setSort] = useState<{ column: number; direction: 1 | -1 }>({ column: 0, direction: 1 }); const rawValue = (cell: string | React.ReactNode) => typeof cell === "string" ? cell : isValidElement(cell) ? Number((cell.props as { "data-sort-value"?: number })["data-sort-value"] ?? 0) : 0; const levelColumn = headers.indexOf("Nível"); const levelRank = (value: string) => value.toLowerCase().includes("estagi") ? 0 : Number(value.match(/\d+/)?.[0] ?? 99); const cellClass = (column: number) => column === highlightColumn ? "total-column" : blueColumns.includes(column) ? "report-blue-column" : ""; const sortedRows = sortable ? [...rows].sort((a,b) => { const aRaw = rawValue(a[sort.column]), bRaw = rawValue(b[sort.column]); const av = sort.column === levelColumn ? levelRank(String(aRaw)) : aRaw, bv = sort.column === levelColumn ? levelRank(String(bRaw)) : bRaw; return (typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv), "pt-BR", { numeric: true })) * sort.direction; }) : rows; const toggleSort = (column: number) => setSort(current => current.column === column ? { column, direction: current.direction === 1 ? -1 : 1 } : { column, direction: 1 }); return <div className="table-wrap responsive-card-table">{sortable && <div className="mobile-sort-controls"><label>Ordenar por<select value={sort.column} onChange={event => setSort({ column: Number(event.target.value), direction: 1 })}>{headers.map((header, index) => <option key={header} value={index}>{header}</option>)}</select></label><button type="button" onClick={() => setSort(current => ({ ...current, direction: current.direction === 1 ? -1 : 1 }))}>{sort.direction === 1 ? "Crescente ↑" : "Decrescente ↓"}</button></div>}<table><thead><tr>{headers.map((h, i) => <th className={cellClass(i)} key={h}>{sortable ? <button type="button" className="sort-header" onClick={() => toggleSort(i)}>{h}<span>{sort.column === i ? sort.direction === 1 ? "▲" : "▼" : "↕"}</span></button> : h}</th>)}</tr></thead><tbody>{sortedRows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td data-label={headers[j]} className={cellClass(j)} key={j}>{cell === "Pendente" || cell === "Aprovada" ? <span className={`pill ${cell === "Pendente" ? "pending" : "approved"}`}>{cell}</span> : cell}</td>)}</tr>)}</tbody></table></div>; }
