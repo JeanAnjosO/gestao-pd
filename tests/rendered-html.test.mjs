@@ -47,6 +47,9 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(utils, /export const scheduleAppliesOn/);
   assert.match(calendar, /export function chooseCalendarPerson/);
   assert.match(page, /chooseCalendarPerson\(/);
+  assert.match(page, /Mês atual/);
+  assert.match(page, /Próximo mês/);
+  assert.match(page, /managerMonthOffset === 0 && <TodayOperations/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
   assert.match(ui, /export function Table/);
 });
