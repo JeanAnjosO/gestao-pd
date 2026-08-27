@@ -44,6 +44,7 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.doesNotMatch(page, /^function InstallAppPrompt\s*\(/m);
   assert.match(types, /export type Profile/);
   assert.match(constants, /export const PERSON_TYPES/);
+  assert.match(constants, /WEB_INACTIVITY_MS = 2 \* 60 \* 60 \* 1000/);
   assert.match(utils, /export const scheduleAppliesOn/);
   assert.match(calendar, /export function chooseCalendarPerson/);
   assert.match(page, /chooseCalendarPerson\(/);

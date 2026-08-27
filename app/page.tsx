@@ -78,7 +78,7 @@ export default function Home() {
     const scheduleWebExpiry = () => {
       window.clearTimeout(timeout);
       const lastActivity = Number(window.localStorage.getItem(SESSION_ACTIVITY_KEY)) || Date.now();
-      timeout = window.setTimeout(() => void expire("Sua sessão expirou após 10 minutos sem uso. Entre novamente."), Math.max(0, WEB_INACTIVITY_MS - (Date.now() - lastActivity)));
+      timeout = window.setTimeout(() => void expire("Sua sessão expirou após 2 horas sem uso. Entre novamente."), Math.max(0, WEB_INACTIVITY_MS - (Date.now() - lastActivity)));
     };
     const recordActivity = () => {
       if (mobile || Date.now() - lastRecordedActivity < 3000) return;
@@ -89,7 +89,7 @@ export default function Home() {
     const handleVisibility = () => {
       if (document.visibilityState !== "visible") return;
       const lastActivity = Number(window.localStorage.getItem(SESSION_ACTIVITY_KEY)) || Date.now();
-      if (Date.now() - lastActivity >= WEB_INACTIVITY_MS) void expire("Sua sessão expirou após 10 minutos sem uso. Entre novamente.");
+      if (Date.now() - lastActivity >= WEB_INACTIVITY_MS) void expire("Sua sessão expirou após 2 horas sem uso. Entre novamente.");
       else recordActivity();
     };
     const verifyMobileRelease = async () => {
