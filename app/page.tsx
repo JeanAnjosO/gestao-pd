@@ -7,7 +7,7 @@ import { InstallAppPrompt } from "./components/InstallAppPrompt";
 import { Stat, Table, Title } from "./components/ui";
 import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteRow, CalendarPeriodRow, CapabilityRow, ClassRow, CompensationRateRow, DailyOverrideRow, FunctionTypeId, ManagerDayRow, MonthlyPeriodEventRow, MonthlyPeriodRow, OperationExceptionRow, PasswordRecoveryRow, PersonRow, PersonTypeId, Profile, Role, ScheduleRow, Screen, SoloRow, SubstitutionRow, UnitRow } from "./domain/types";
 import { ADMIN_ACCESS_ROLE_ID, APP_RELEASE, ASSIGNMENT_TYPES, CALENDAR_MODES, CALENDAR_TEAM_RELEASE_AT, CAPABILITIES, CLASS_TYPES, FUNCTION_TYPES, MOBILE_SESSION_MS, menus, menuIcons, PERSON_TYPES, RECEPTION_PRIORITY_PERSON_IDS, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY, WEB_INACTIVITY_MS, functionTypeOptions, labels, personTypeOptions, week } from "./domain/constants";
-import { clearSessionMetadata, displayName, firstBusinessDayOfCurrentMonth, formatCurrency, isMobileSession, isPersonType, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
+import { clearSessionMetadata, displayName, formatCurrency, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
 import { chooseCalendarPerson } from "./domain/calendar";
 
 export default function Home() {
@@ -1089,10 +1089,10 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
     const selectedOpenDays = scheduleWeekdays.filter(index => openingDays[index]);
     if (!unitId || !selectedSchedulePerson || !selectedOpenDays.length) return;
     const dailyType = isPersonType(selectedSchedulePerson, "manager") ? "manager_support" : String(form.get("daily_type"));
-    const payload = selectedOpenDays.map(weekday => ({ unit_id: unitId, person_id: selectedSchedulePerson.id, weekday, daily_type: dailyType, starts_on: firstBusinessDayOfCurrentMonth(), ends_on: null }));
-    const { data, error } = await supabase.from("schedules").insert(payload).select("id,person_id,weekday,daily_type,starts_on,ends_on");
-    if (!error && data) {
-      setSchedules([...schedules, ...(data as ScheduleRow[])].sort((a,b) => a.weekday - b.weekday));
+    const { error: replaceError } = await supabase.rpc("replace_schedule_from_date", { p_unit_id: unitId, p_person_id: selectedSchedulePerson.id, p_weekdays: selectedOpenDays, p_daily_type: dailyType, p_effective_on: localIsoDate() });
+    if (!replaceError) {
+      const { data } = await supabase.from("schedules").select("id,person_id,weekday,daily_type,starts_on,ends_on").eq("unit_id", unitId);
+      if (data) setSchedules(data as ScheduleRow[]);
       setScheduleWeekdays([]);
     }
   };
@@ -1112,15 +1112,9 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
     const person = people.find(item => item.id === personId);
     const selectedOpenDays = editScheduleWeekdays.filter(index => openingDays[index]);
     if (!person || !selectedOpenDays.length) return;
-    const activeRows = schedules.filter(schedule => schedule.person_id === personId && !schedule.ends_on);
     const dailyType = isPersonType(person, "manager") ? "manager_support" : editScheduleDailyType;
-    const endDate = new Date().toISOString().slice(0,10);
-    const removedIds = activeRows.filter(row => !selectedOpenDays.includes(row.weekday)).map(row => row.id);
-    const keptIds = activeRows.filter(row => selectedOpenDays.includes(row.weekday)).map(row => row.id);
-    const addedDays = selectedOpenDays.filter(day => !activeRows.some(row => row.weekday === day));
-    if (removedIds.length) await supabase.from("schedules").update({ ends_on: endDate }).in("id", removedIds);
-    if (keptIds.length) await supabase.from("schedules").update({ daily_type: dailyType }).in("id", keptIds);
-    if (addedDays.length) await supabase.from("schedules").insert(addedDays.map(weekday => ({ unit_id: unitId, person_id: personId, weekday, daily_type: dailyType, starts_on: firstBusinessDayOfCurrentMonth(), ends_on: null })));
+    const { error: replaceError } = await supabase.rpc("replace_schedule_from_date", { p_unit_id: unitId, p_person_id: personId, p_weekdays: selectedOpenDays, p_daily_type: dailyType, p_effective_on: localIsoDate() });
+    if (replaceError) return;
     const { data, error } = await supabase.from("schedules").select("id,person_id,weekday,daily_type,starts_on,ends_on").eq("unit_id", unitId);
     if (!error && data) setSchedules(data as ScheduleRow[]);
     setEditingSchedulePersonId(null);

@@ -4,13 +4,8 @@ import { ADMIN_ACCESS_ROLE_ID, PERSON_TYPES, SESSION_ACTIVITY_KEY, SESSION_LOGIN
 export const formatCurrency = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 export const isPersonType = (person: Pick<PersonRow, "person_type_id"> | Pick<Profile, "person_type_id">, type: keyof typeof PERSON_TYPES) => person.person_type_id === PERSON_TYPES[type];
 export const toUiRole = (value: AccessRoleTypeId): Role => value === PERSON_TYPES.manager || value === ADMIN_ACCESS_ROLE_ID ? "gestor" : value === PERSON_TYPES.teacher ? "professor" : "recepcao";
-export const firstBusinessDayOfCurrentMonth = () => {
-  const now = new Date();
-  const day = new Date(now.getFullYear(), now.getMonth(), 1);
-  while (day.getDay() === 0 || day.getDay() === 6) day.setDate(day.getDate() + 1);
-  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
-};
-export const scheduleAppliesOn = (schedule: ScheduleRow, date: string) => schedule.starts_on.slice(0, 7) <= date.slice(0, 7) && (!schedule.ends_on || schedule.ends_on >= date);
+export const localIsoDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+export const scheduleAppliesOn = (schedule: ScheduleRow, date: string) => schedule.starts_on <= date && (!schedule.ends_on || schedule.ends_on >= date);
 export const unitIsOpenOn = (date: string, openingDays: boolean[], exceptions: OperationExceptionRow[]) => exceptions.find(item => item.date === date)?.open ?? openingDays[new Date(`${date}T12:00:00`).getDay()];
 export const personLevelLabel = (person?: PersonRow) => !person ? "—" : isPersonType(person, "intern") ? "Estagiário(a)" : person.level ? `Nível ${person.level}` : "—";
 export const displayName = (person?: { name: string; nickname?: string | null } | null) => person?.nickname?.trim() || person?.name || "—";
