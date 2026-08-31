@@ -375,7 +375,9 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
         todaySubs.forEach(row => { if (row.substitute_person_id) presentIds.add(row.substitute_person_id); });
         const externalNames = Array.from(new Set(todaySubs.filter(row => !row.substitute_person_id && row.external_name).map(row => row.external_name!.trim())));
         const presentNames = [...Array.from(presentIds).map(personName), ...externalNames];
-        const absentNames = scheduled.filter(person => absentIds.has(person.id)).map(person => displayName(person));
+        const teamAbsentNames = scheduled.filter(person => absentIds.has(person.id)).map(person => displayName(person));
+        const fixedReceptionAbsentNames = people.filter(person => person.active && isPersonType(person, "reception") && absentIds.has(person.id) && schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date))).map(person => displayName(person));
+        const absentNames = Array.from(new Set([...teamAbsentNames, ...fixedReceptionAbsentNames]));
         const receptionAssignment = receptionAssignments.find(row => row.date === date);
         const receptionName = receptionAssignment ? personName(receptionAssignment.person_id) : unitOpen ? "Não definida" : "Unidade fechada";
         const receptionAbsent = Boolean(receptionAssignment && absentIds.has(receptionAssignment.person_id));
@@ -384,7 +386,7 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
         const hasCoverage = scheduled.length > 0 || todaySubs.length > 0;
         const critical = hasCoverage && present < minimumTeachers;
         const soloPeople = Array.from(new Map(daySolo.map(row => [row.teacher_id, row.people ? displayName(row.people) : personName(row.teacher_id)])).values());
-        const label = `${day}: ${present} presentes, mínimo ${minimumTeachers}, ${receptionLabel}${absentNames.length ? `, ${absentNames.length} faltas na equipe` : ""}${soloPeople.length ? `, ${soloPeople.length} com aula solo` : ""}`;
+        const label = `${day}: ${present} presentes, mínimo ${minimumTeachers}, ${receptionLabel}${absentNames.length ? `, faltas: ${absentNames.join(", ")}` : ""}${soloPeople.length ? `, ${soloPeople.length} com aula solo` : ""}`;
         return <div tabIndex={0} aria-label={label} className={`overview-day ${hasCoverage ? critical ? "coverage-critical" : "coverage-regular" : ""}`} key={date}><b>{day}</b>{soloPeople.length > 0 && <><span className="overview-solo-names">{soloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{soloPeople.length}</span></>}<span className="day-popover"><strong>{present} presentes · mínimo {minimumTeachers}</strong><small>{presentNames.length ? `Presentes: ${presentNames.join(", ")}` : "Nenhuma presença prevista"}</small><small>{receptionLabel}</small>{absentNames.length > 0 && <small>Faltas: {absentNames.join(", ")}</small>}{soloPeople.length > 0 && <small>Aulas solo: {soloPeople.join(", ")}</small>}</span></div>;
       }
       const scheduled = unitOpen && schedules.some(schedule => schedule.person_id === profile.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date));

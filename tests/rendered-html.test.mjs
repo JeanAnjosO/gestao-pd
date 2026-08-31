@@ -57,6 +57,8 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /managerMonthOffset === 0 && <TodayOperations/);
   assert.match(page, /Recepção: \$\{receptionName\}/);
   assert.match(page, /receptionAbsent \? " \(falta\)"/);
+  assert.match(page, /fixedReceptionAbsentNames/);
+  assert.match(page, /new Set\(\[\.\.\.teamAbsentNames, \.\.\.fixedReceptionAbsentNames\]\)/);
   assert.match(page, /\.eq\("assignment_type_id", ASSIGNMENT_TYPES\.reception\)/);
   assert.match(page, /const present = presentNames\.length/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
