@@ -7,7 +7,7 @@ import { InstallAppPrompt } from "./components/InstallAppPrompt";
 import { Stat, Table, Title } from "./components/ui";
 import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteRow, CalendarPeriodRow, CapabilityRow, ClassRow, CompensationRateRow, DailyOverrideRow, FunctionTypeId, ManagerDayRow, MonthlyPeriodEventRow, MonthlyPeriodRow, OperationExceptionRow, PasswordRecoveryRow, PersonRow, PersonTypeId, Profile, Role, ScheduleRow, Screen, SoloRow, SubstitutionRow, UnitRow } from "./domain/types";
 import { ADMIN_ACCESS_ROLE_ID, APP_RELEASE, ASSIGNMENT_TYPES, CALENDAR_MODES, CALENDAR_TEAM_RELEASE_AT, CAPABILITIES, CLASS_TYPES, FUNCTION_TYPES, MOBILE_SESSION_MS, menus, menuIcons, PERSON_TYPES, RECEPTION_PRIORITY_PERSON_IDS, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY, WEB_INACTIVITY_MS, functionTypeOptions, labels, personTypeOptions, week } from "./domain/constants";
-import { clearSessionMetadata, displayName, formatCurrency, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
+import { clearSessionMetadata, displayName, formatCurrency, isHolidayOn, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
 import { chooseCalendarPerson } from "./domain/calendar";
 
 export default function Home() {
@@ -259,8 +259,8 @@ export default function Home() {
           {screen === "visao" && <Overview role={role} profile={profile} unitId={unitId} minimumTeachers={selectedUnit?.minimum_teachers ?? 4} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} soloRows={soloRows} onReviewPending={() => setScreen("solo")} />}
           {screen === "calendario" && <OperationalCalendar role={role} profile={profile} unit={selectedUnit} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} />}
           {screen === "faltas" && <Absences role={role} profile={profile} unitId={unitId} minimumTeachers={selectedUnit?.minimum_teachers ?? 4} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} />}
-          {screen === "solo" && <Solo role={role} profile={profile} unitId={unitId} classes={classes} people={people} schedules={schedules} substitutions={substitutionRows} rows={soloRows} setRows={setSoloRows} />}
-          {screen === "substituicoes" && <Substitutions profile={profile} unitId={unitId} openingDays={openingDays} people={people} rows={substitutionRows} setRows={setSubstitutionRows} />}
+          {screen === "solo" && <Solo role={role} profile={profile} unitId={unitId} classes={classes} people={people} schedules={schedules} operationExceptions={operationExceptions} substitutions={substitutionRows} rows={soloRows} setRows={setSoloRows} />}
+          {screen === "substituicoes" && <Substitutions profile={profile} unitId={unitId} openingDays={openingDays} operationExceptions={operationExceptions} people={people} rows={substitutionRows} setRows={setSubstitutionRows} />}
           {screen === "relatorios" && <Reports unitId={unitId} openingDays={openingDays} people={people} schedules={schedules} operationExceptions={operationExceptions} soloRows={soloRows} substitutions={substitutionRows} />}
           {screen === "parametros" && <Parameters profile={profile} unitId={unitId} units={units} setUnits={setUnits} selectUnit={setUnitId} openingDays={openingDays} setOpeningDays={setOpeningDays} operationExceptions={operationExceptions} setOperationExceptions={setOperationExceptions} people={people} setPeople={setPeople} schedules={schedules} setSchedules={setSchedules} soloRows={soloRows} />}
         </div>
@@ -274,6 +274,7 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
   const [overviewManagerDays, setOverviewManagerDays] = useState<ManagerDayRow[]>([]);
   const [overviewSubstitutions, setOverviewSubstitutions] = useState<SubstitutionRow[]>([]);
   const [overviewReceptionAssignments, setOverviewReceptionAssignments] = useState<CalendarAssignmentRow[]>([]);
+  const [overviewOverrides, setOverviewOverrides] = useState<DailyOverrideRow[]>([]);
   const [overviewPeriodStatus, setOverviewPeriodStatus] = useState<"open" | "closed">("open");
   const currentMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const [managerMonthOffset, setManagerMonthOffset] = useState<0 | 1>(0);
@@ -286,17 +287,19 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
     if (!unitId) return;
     const loadCoverage = async () => {
       setOverviewPeriodStatus("open");
-      const [{ data: absenceData }, { data: managerData }, { data: substitutionData }, { data: receptionData }, { data: periodData }] = await Promise.all([
+      const [{ data: absenceData }, { data: managerData }, { data: substitutionData }, { data: receptionData }, { data: overrideData }, { data: periodData }] = await Promise.all([
         supabase.from("absences").select("id,date,person_id,created_by,created_at").eq("unit_id", unitId).gte("date", start).lte("date", end),
         supabase.from("manager_teaching_days").select("id,date,manager_id,created_by").eq("unit_id", unitId).gte("date", start).lte("date", end),
         supabase.from("substitutions").select("id,date,substitute_person_id,external_name,external_level,daily_type,created_by").eq("unit_id", unitId).gte("date", start).lte("date", end),
         supabase.from("calendar_assignments").select("id,date,assignment_type_id,class_type_id,person_id,manually_assigned").eq("unit_id", unitId).eq("assignment_type_id", ASSIGNMENT_TYPES.reception).gte("date", start).lte("date", end),
+        supabase.from("daily_overrides").select("id,date,person_id,daily_type,created_by").eq("unit_id", unitId).gte("date", start).lte("date", end),
         supabase.from("monthly_periods").select("status").eq("unit_id", unitId).eq("year", year).eq("month", month + 1).limit(1),
       ]);
       if (absenceData) setOverviewAbsences(absenceData as AbsenceRow[]);
       if (managerData) setOverviewManagerDays(managerData as ManagerDayRow[]);
       if (substitutionData) setOverviewSubstitutions(substitutionData as SubstitutionRow[]);
       setOverviewReceptionAssignments((receptionData as CalendarAssignmentRow[] | null) ?? []);
+      setOverviewOverrides((overrideData as DailyOverrideRow[] | null) ?? []);
       if (periodData?.[0]?.status) setOverviewPeriodStatus(periodData[0].status as "open" | "closed");
     };
     void loadCoverage();
@@ -306,7 +309,8 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
   const monthTitle = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(viewMonth);
   if (role !== "gestor") {
     const scheduledDates = monthDates.filter(date => {
-      if (!unitIsOpenOn(date, openingDays, operationExceptions)) return false;
+      if (overviewOverrides.some(item => item.person_id === profile.id && item.date === date)) return true;
+      if (!unitIsOpenOn(date, openingDays, operationExceptions) || isHolidayOn(date, operationExceptions)) return false;
       const weekday = new Date(`${date}T12:00:00`).getDay();
       return schedules.some(schedule => schedule.person_id === profile.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date));
     });
@@ -315,10 +319,11 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
     const accountedDates = new Set([...scheduledDates.filter(date => !absenceDates.has(date)), ...substitutionDates]);
     const personSolo = soloRows.filter(row => row.teacher_id === profile.id && row.date >= start && row.date <= end);
     const pendingPersonSolo = personSolo.filter(row => row.status === "pending").length;
-    return <><Title title={`Olá, ${profile.name.split(" ")[0]}`} text={`Seu resumo de ${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}.`} /><div className={`stats ${role === "professor" ? "stats-four" : ""}`}><Stat label="Dias previstos" value={String(scheduledDates.length)} /><Stat label="Faltas" value={String(absenceDates.size)} /><Stat label="Dias contabilizados" value={String(accountedDates.size)} />{role === "professor" && <Stat label="Aulas solo no mês" value={String(personSolo.length)} detail={pendingPersonSolo ? `${pendingPersonSolo} aguardando aprovação` : "Nenhuma pendente"} />}</div><TodayOperations unitId={unitId} people={people} /><OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} receptionAssignments={overviewReceptionAssignments} soloRows={soloRows} /></>;
+    return <><Title title={`Olá, ${profile.name.split(" ")[0]}`} text={`Seu resumo de ${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}.`} /><div className={`stats ${role === "professor" ? "stats-four" : ""}`}><Stat label="Dias previstos" value={String(scheduledDates.length)} /><Stat label="Faltas" value={String(absenceDates.size)} /><Stat label="Dias contabilizados" value={String(accountedDates.size)} />{role === "professor" && <Stat label="Aulas solo no mês" value={String(personSolo.length)} detail={pendingPersonSolo ? `${pendingPersonSolo} aguardando aprovação` : "Nenhuma pendente"} />}</div><TodayOperations unitId={unitId} people={people} operationExceptions={operationExceptions} /><OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} receptionAssignments={overviewReceptionAssignments} overrides={overviewOverrides} soloRows={soloRows} /></>;
   }
   const coverageAlerts = Array.from({ length: daysInMonth }, (_, index) => index + 1).map(day => {
     const date = `${year}-${String(month + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
+    if (isHolidayOn(date, operationExceptions)) return { date, scheduled: 0, present: 0 };
     const weekday = new Date(`${date}T12:00:00`).getDay();
     const scheduled = people.filter(person => person.active && !isPersonType(person, "reception") && unitIsOpenOn(date, openingDays, operationExceptions) && (schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) || overviewManagerDays.some(extra => extra.manager_id === person.id && extra.date === date)));
     const presentIds = new Set(scheduled.filter(person => !overviewAbsences.some(absence => absence.person_id === person.id && absence.date === date)).map(person => person.id));
@@ -329,10 +334,10 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
     return { date, scheduled: scheduled.length, present };
   }).filter(day => day.scheduled > 0 && day.present < minimumTeachers);
   const pendingSolo = soloRows.filter(row => row.status === "pending" && row.date >= start && row.date <= end).length;
-  return <><div className="overview-month-switch" role="group" aria-label="Mês exibido na visão geral"><button type="button" className={managerMonthOffset === 0 ? "active" : ""} aria-pressed={managerMonthOffset === 0} onClick={() => setManagerMonthOffset(0)}>Mês atual</button><button type="button" className={managerMonthOffset === 1 ? "active" : ""} aria-pressed={managerMonthOffset === 1} onClick={() => setManagerMonthOffset(1)}>Próximo mês</button></div><Title title="Visão geral" text={`${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}`} action="Revisar pendências" onAction={onReviewPending} /><div className="stats"><Stat label="Cobertura crítica" value={`${coverageAlerts.length} ${coverageAlerts.length === 1 ? "dia" : "dias"}`} tone={coverageAlerts.length ? "danger" : undefined} /><Stat label="Aulas solo pendentes" value={String(pendingSolo)} /><Stat label="Fechamento automático" value="D+1 útil" detail="Após o fim da competência" /></div>{managerMonthOffset === 0 && <TodayOperations unitId={unitId} people={people} />}<OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} receptionAssignments={overviewReceptionAssignments} soloRows={soloRows} /></>;
+  return <><div className="overview-month-switch" role="group" aria-label="Mês exibido na visão geral"><button type="button" className={managerMonthOffset === 0 ? "active" : ""} aria-pressed={managerMonthOffset === 0} onClick={() => setManagerMonthOffset(0)}>Mês atual</button><button type="button" className={managerMonthOffset === 1 ? "active" : ""} aria-pressed={managerMonthOffset === 1} onClick={() => setManagerMonthOffset(1)}>Próximo mês</button></div><Title title="Visão geral" text={`${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}`} action="Revisar pendências" onAction={onReviewPending} /><div className="stats"><Stat label="Cobertura crítica" value={`${coverageAlerts.length} ${coverageAlerts.length === 1 ? "dia" : "dias"}`} tone={coverageAlerts.length ? "danger" : undefined} /><Stat label="Aulas solo pendentes" value={String(pendingSolo)} /><Stat label="Fechamento automático" value="D+1 útil" detail="Após o fim da competência" /></div>{managerMonthOffset === 0 && <TodayOperations unitId={unitId} people={people} operationExceptions={operationExceptions} />}<OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} receptionAssignments={overviewReceptionAssignments} overrides={overviewOverrides} soloRows={soloRows} /></>;
 }
 
-function TodayOperations({ unitId, people }: { unitId: number | null; people: PersonRow[] }) {
+function TodayOperations({ unitId, people, operationExceptions }: { unitId: number | null; people: PersonRow[]; operationExceptions: OperationExceptionRow[] }) {
   const [rows, setRows] = useState<CalendarAssignmentRow[]>([]);
   const [note, setNote] = useState("");
   const today = new Date().toISOString().slice(0,10);
@@ -349,13 +354,13 @@ function TodayOperations({ unitId, people }: { unitId: number | null; people: Pe
     };
     void load();
   }, [unitId, today]);
-  if (!rows.length) return null;
+  if (!rows.length || isHolidayOn(today, operationExceptions)) return null;
   const getName = (type: number, classId: number | null) => { const person = people.find(item => item.id === rows.find(row => row.assignment_type_id === type && row.class_type_id === classId)?.person_id); return person ? displayName(person) : "Pendente"; };
   const classIds = Array.from(new Set(rows.filter(row => row.assignment_type_id !== 3).map(row => row.class_type_id)));
   return <section className="panel today-operations"><div><small>FUNÇÕES DE HOJE</small><h3>{new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).format(new Date(`${today}T12:00:00`))}</h3>{note && <p>{note}</p>}</div><div className="today-operation-grid">{classIds.map(classId => <div key={classId ?? "simple"}>{classId && <span className={`class-marker ${CLASS_TYPES.find(item => item.id === classId)?.code ?? ""}`}>{CLASS_TYPES.find(item => item.id === classId)?.label}</span>}<small>Roda</small><strong>{getName(1, classId)}</strong><small>Som</small><strong>{getName(2, classId)}</strong></div>)}<div className="today-reception"><small>Portaria</small><strong>{getName(3, null)}</strong></div></div></section>;
 }
 
-function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, operationExceptions, people, schedules, absences, managerDays, substitutions, receptionAssignments, soloRows }: { role: Role; profile: Profile; month: Date; minimumTeachers: number; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[]; absences: AbsenceRow[]; managerDays: ManagerDayRow[]; substitutions: SubstitutionRow[]; receptionAssignments: CalendarAssignmentRow[]; soloRows: SoloRow[] }) {
+function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, operationExceptions, people, schedules, absences, managerDays, substitutions, receptionAssignments, overrides, soloRows }: { role: Role; profile: Profile; month: Date; minimumTeachers: number; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[]; absences: AbsenceRow[]; managerDays: ManagerDayRow[]; substitutions: SubstitutionRow[]; receptionAssignments: CalendarAssignmentRow[]; overrides: DailyOverrideRow[]; soloRows: SoloRow[] }) {
   const year = month.getFullYear(), monthIndex = month.getMonth(), days = new Date(year, monthIndex + 1, 0).getDate(), offset = new Date(year, monthIndex, 1).getDay(), cells = Math.ceil((offset + days) / 7) * 7;
   const personName = (id: number) => { const person = people.find(item => item.id === id); return person ? displayName(person) : "Pessoa cadastrada"; };
   return <section className="panel overview-calendar-panel">
@@ -366,8 +371,16 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
       const date = `${year}-${String(monthIndex + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
       const weekday = new Date(`${date}T12:00:00`).getDay();
       const unitOpen = unitIsOpenOn(date, openingDays, operationExceptions);
+      const holiday = isHolidayOn(date, operationExceptions);
       const daySolo = soloRows.filter(row => row.date === date);
       if (role === "gestor") {
+        if (holiday) {
+          const holidayDaily = overrides.filter(item => item.date === date).map(item => `${personName(item.person_id)} (${item.daily_type === "full" ? "completa" : "meia"})`);
+          const holidayAbsences = Array.from(new Set(absences.filter(item => item.date === date).map(item => personName(item.person_id))));
+          const holidaySoloPeople = Array.from(new Map(daySolo.map(row => [row.teacher_id, row.people ? displayName(row.people) : personName(row.teacher_id)])).values());
+          const holidayLabel = `${day}: feriado${holidayDaily.length ? `, diárias: ${holidayDaily.join(", ")}` : ""}${holidayAbsences.length ? `, faltas: ${holidayAbsences.join(", ")}` : ""}${holidaySoloPeople.length ? `, aulas solo: ${holidaySoloPeople.join(", ")}` : ""}`;
+          return <div tabIndex={0} aria-label={holidayLabel} className="overview-day holiday-day" key={date}><b>{day}</b>{holidaySoloPeople.length > 0 && <><span className="overview-solo-names">{holidaySoloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{holidaySoloPeople.length}</span></>}<span className="day-popover"><strong>Feriado</strong><small>{holidayDaily.length ? `Diárias: ${holidayDaily.join(", ")}` : "Nenhuma diária marcada"}</small>{holidayAbsences.length > 0 && <small>Faltas: {holidayAbsences.join(", ")}</small>}{holidaySoloPeople.length > 0 && <small>Aulas solo: {holidaySoloPeople.join(", ")}</small>}</span></div>;
+        }
         const scheduled = people.filter(person => person.active && !isPersonType(person, "reception") && unitOpen && (schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) || managerDays.some(extra => extra.manager_id === person.id && extra.date === date)));
         const absentIds = new Set(absences.filter(row => row.date === date).map(row => row.person_id));
         const presentIds = new Set(scheduled.filter(person => !absentIds.has(person.id)).map(person => person.id));
@@ -389,12 +402,13 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
         const label = `${day}: ${present} presentes, mínimo ${minimumTeachers}, ${receptionLabel}${absentNames.length ? `, faltas: ${absentNames.join(", ")}` : ""}${soloPeople.length ? `, ${soloPeople.length} com aula solo` : ""}`;
         return <div tabIndex={0} aria-label={label} className={`overview-day ${hasCoverage ? critical ? "coverage-critical" : "coverage-regular" : ""}`} key={date}><b>{day}</b>{soloPeople.length > 0 && <><span className="overview-solo-names">{soloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{soloPeople.length}</span></>}<span className="day-popover"><strong>{present} presentes · mínimo {minimumTeachers}</strong><small>{presentNames.length ? `Presentes: ${presentNames.join(", ")}` : "Nenhuma presença prevista"}</small><small>{receptionLabel}</small>{absentNames.length > 0 && <small>Faltas: {absentNames.join(", ")}</small>}{soloPeople.length > 0 && <small>Aulas solo: {soloPeople.join(", ")}</small>}</span></div>;
       }
-      const scheduled = unitOpen && schedules.some(schedule => schedule.person_id === profile.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date));
+      const holidayOverride = overrides.find(item => item.person_id === profile.id && item.date === date);
+      const scheduled = Boolean(holidayOverride) || (!holiday && unitOpen && schedules.some(schedule => schedule.person_id === profile.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)));
       const absent = absences.some(row => row.person_id === profile.id && row.date === date);
       const personSoloRows = daySolo.filter(row => row.teacher_id === profile.id);
       const soloCount = personSoloRows.length;
-      const label = `${day}: ${absent ? "falta marcada" : scheduled ? "dia previsto" : unitOpen ? "sem escala" : "unidade fechada"}${soloCount ? `, ${soloCount} ${soloCount === 1 ? "aula solo" : "aulas solo"}` : ""}`;
-      return <div tabIndex={0} aria-label={label} className={`overview-day ${absent ? "person-absent" : scheduled ? "person-scheduled" : ""}`} key={date}><b>{day}</b>{absent && <em className="personal-mark absence-mark">Falta</em>}{soloCount > 0 && <><em className="personal-mark solo-mark">{soloCount} {soloCount === 1 ? "solo" : "solos"}</em><span className="mobile-day-count">{soloCount}</span></>}<span className="day-popover"><strong>Dia {day}</strong><small>{absent ? "Falta marcada" : scheduled ? "Dia previsto na escala" : unitOpen ? "Sem escala" : "Unidade fechada"}</small>{soloCount > 0 && <small>{soloCount} {soloCount === 1 ? "aula solo registrada" : "aulas solo registradas"}</small>}</span></div>;
+      const label = `${day}: ${holiday ? "feriado" : absent ? "falta marcada" : scheduled ? "dia previsto" : unitOpen ? "sem escala" : "unidade fechada"}${holidayOverride ? `, diária ${holidayOverride.daily_type === "full" ? "completa" : "meia"}` : ""}${soloCount ? `, ${soloCount} ${soloCount === 1 ? "aula solo" : "aulas solo"}` : ""}`;
+      return <div tabIndex={0} aria-label={label} className={`overview-day ${holiday ? "holiday-day" : absent ? "person-absent" : scheduled ? "person-scheduled" : ""}`} key={date}><b>{day}</b>{absent && <em className="personal-mark absence-mark">Falta</em>}{soloCount > 0 && <><em className="personal-mark solo-mark">{soloCount} {soloCount === 1 ? "solo" : "solos"}</em><span className="mobile-day-count">{soloCount}</span></>}<span className="day-popover"><strong>{holiday ? "Feriado" : `Dia ${day}`}</strong><small>{absent ? "Falta marcada" : holidayOverride ? `Diária ${holidayOverride.daily_type === "full" ? "completa" : "meia"} contabilizada` : scheduled ? "Dia previsto na escala" : holiday ? "Sem diária marcada" : unitOpen ? "Sem escala" : "Unidade fechada"}</small>{soloCount > 0 && <small>{soloCount} {soloCount === 1 ? "aula solo registrada" : "aulas solo registradas"}</small>}</span></div>;
     })}</div>
   </section>;
 }
@@ -448,7 +462,8 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const days = Array.from({ length: new Date(year, month + 1, 0).getDate() }, (_, index) => {
     const date = `${year}-${String(month + 1).padStart(2,"0")}-${String(index + 1).padStart(2,"0")}`;
     return date;
-  }).filter(date => unitIsOpenOn(date, openingDays, operationExceptions));
+  }).filter(date => unitIsOpenOn(date, openingDays, operationExceptions) || isHolidayOn(date, operationExceptions));
+  const operationalDays = days.filter(date => !isHolidayOn(date, operationExceptions));
   const classSlots = unit.calendar_mode_type_id === CALENDAR_MODES.colors ? CLASS_TYPES : [{ id: null, label: "", code: "simple" }];
   const personName = (id?: number | null) => { const person = people.find(item => item.id === id); return person ? displayName(person) : "Não definido"; };
   const assignmentFor = (date: string, type: number, classId: number | null) => assignments.find(item => item.date === date && item.assignment_type_id === type && item.class_type_id === classId);
@@ -465,9 +480,9 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     const scheduled = scheduledFor(date);
     return type === ASSIGNMENT_TYPES.lead && classId === 3 ? scheduled.filter(person => hasCapability(person.id, CAPABILITIES.leadBlack)) : scheduled;
   };
-  const requiredSlots = days.flatMap(date => [{ date, type: ASSIGNMENT_TYPES.reception, classId: null }, ...classSlots.flatMap(classType => [{ date, type: ASSIGNMENT_TYPES.lead, classId: classType.id }, { date, type: ASSIGNMENT_TYPES.sound, classId: classType.id }])]);
+  const requiredSlots = operationalDays.flatMap(date => [{ date, type: ASSIGNMENT_TYPES.reception, classId: null }, ...classSlots.flatMap(classType => [{ date, type: ASSIGNMENT_TYPES.lead, classId: classType.id }, { date, type: ASSIGNMENT_TYPES.sound, classId: classType.id }])]);
   const missingCount = requiredSlots.filter(slot => !assignmentFor(slot.date, slot.type, slot.classId)).length;
-  const conflictCount = assignments.filter(assignment => absences.some(absence => absence.date === assignment.date && absence.person_id === assignment.person_id)).length;
+  const conflictCount = assignments.filter(assignment => !isHolidayOn(assignment.date, operationExceptions) && absences.some(absence => absence.date === assignment.date && absence.person_id === assignment.person_id)).length;
 
   const generateCalendar = async (rebuildFrom?: string) => {
     if (!isManager) return;
@@ -621,10 +636,10 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     {message && <p className="operation-message calendar-message">{message}</p>}
     {tab === "planning" ? <div className="calendar-planning">
       {isManager && <div className="calendar-actions panel"><div><strong>{missingCount || conflictCount ? `${missingCount} pendentes · ${conflictCount} afetadas por falta` : "Escala completa"}</strong><small>Ao refazer, dias anteriores e observações são preservados.</small></div><button className="primary" disabled={busy} onClick={assignments.length ? rebuildCalendar : () => generateCalendar()}>{busy ? "Gerando…" : assignments.length ? "Refazer calendário" : "Montar calendário"}</button><button className="delete-action" disabled={busy || (!assignments.length && !notes.length)} onClick={clearCalendar}>Limpar calendário</button><button disabled={!period || busy} onClick={publishCalendar}>Publicar escala</button></div>}
-      <div className="calendar-days">{days.map(date => <section className={`calendar-day-card ${requiredSlots.some(slot => slot.date === date && !assignmentFor(date, slot.type, slot.classId)) ? "has-pending" : ""} ${assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)) ? "has-conflict" : ""}`} key={date}><header><div><strong>{formatDay(date)}</strong><small>{assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)) ? "Atenção: responsável com falta" : unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples" : "3 turmas"}</small></div>{isManager ? <input maxLength={240} defaultValue={notes.find(item => item.date === date)?.note ?? ""} placeholder="Observação do dia" onBlur={event => saveNote(date, event.target.value)} /> : <span>{notes.find(item => item.date === date)?.note || "Sem observação"}</span>}</header><div className="calendar-day-rows">{classSlots.map(classType => <div className={`calendar-duty-row class-${classType.code}`} key={classType.id ?? "simple"}>{classType.id && <span className="class-marker">{classType.label}</span>}<label><small>Roda</small>{isManager ? selectFor(date, 1, classType.id) : <strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong>}</label><label><small>Som</small>{isManager ? selectFor(date, 2, classType.id) : <strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong>}</label></div>)}</div><div className="calendar-reception"><small>Portaria</small>{isManager ? selectFor(date, 3, null) : <strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong>}</div></section>)}</div>
+      <div className="calendar-days">{days.map(date => { const holiday = isHolidayOn(date, operationExceptions); const hasConflict = !holiday && assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)); return <section className={`calendar-day-card ${holiday ? "holiday-card" : requiredSlots.some(slot => slot.date === date && !assignmentFor(date, slot.type, slot.classId)) ? "has-pending" : ""} ${hasConflict ? "has-conflict" : ""}`} key={date}><header><div><strong>{formatDay(date)}</strong><small>{holiday ? "FERIADO" : hasConflict ? "Atenção: responsável com falta" : unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples" : "3 turmas"}</small></div>{holiday ? <input value="FERIADO" aria-label={`Observação de ${date}`} disabled readOnly /> : isManager ? <input maxLength={240} defaultValue={notes.find(item => item.date === date)?.note ?? ""} placeholder="Observação do dia" onBlur={event => saveNote(date, event.target.value)} /> : <span>{notes.find(item => item.date === date)?.note || "Sem observação"}</span>}</header><div className="calendar-day-rows">{classSlots.map(classType => <div className={`calendar-duty-row class-${classType.code}`} key={classType.id ?? "simple"}>{classType.id && <span className="class-marker">{classType.label}</span>}<label><small>Roda</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 1, classType.id) : <strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong>}</label><label><small>Som</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 2, classType.id) : <strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong>}</label></div>)}</div><div className="calendar-reception"><small>Portaria</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 3, null) : <strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong>}</div></section>; })}</div>
     </div> : <div className="calendar-board-area">
       <div className="board-controls panel"><label>Período<select value={range} onChange={event => setRange(event.target.value as typeof range)}><option value="first">1º quadro · até a 2ª sexta</option><option value="second">2º quadro · restante do mês</option><option value="month">Mês completo</option></select></label><button onClick={() => exportImage(false)} disabled={busy}>Baixar imagem</button><button className="primary" onClick={() => exportImage(true)} disabled={busy}>Compartilhar</button><button onClick={() => window.print()}>Imprimir / PDF</button></div>
-      <div className="calendar-board-scroll"><div className={`calendar-share-board mode-${unit.calendar_mode_type_id === 1 ? "simple" : "colors"}`} ref={boardRef}><div className="share-board-heading"><div className="share-board-brand"><div><span>GESTÃO PD</span><h3>{unit.name}</h3></div><strong>Calendário {monthName}</strong></div><div><small>{range === "month" ? "Mês completo" : range === "first" ? "1º quadro · até a 2ª sexta" : "2º quadro · restante do mês"}</small></div></div><table><thead><tr><th>Data</th><th>Roda</th><th>Som</th><th>Portaria</th><th>Observação</th></tr></thead><tbody>{visibleDays.flatMap((date, dayIndex) => { const rows = classSlots.map((classType, index) => <tr className={`class-${classType.code}`} key={`${date}-${classType.id ?? "simple"}`}>{index === 0 && <td className="board-date-cell board-merged-cell" rowSpan={classSlots.length}>{formatDay(date)}</td>}<td className="board-duty-cell"><strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong></td><td className="board-duty-cell"><strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong></td>{index === 0 && <td className="board-reception-cell board-merged-cell" rowSpan={classSlots.length}><strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong></td>}{index === 0 && <td className="board-note-cell board-merged-cell" rowSpan={classSlots.length}>{notes.find(item => item.date === date)?.note ?? ""}</td>}</tr>); const showWeek = dayIndex === 0 || calendarWeek(visibleDays[dayIndex - 1]) !== calendarWeek(date); return [<tr className="board-week-row" key={`week-${date}`}><td colSpan={5}>Semana {calendarWeek(date)}</td></tr>, ...rows].filter((_, index) => showWeek || index > 0); })}</tbody></table><div className="share-board-footer"><span>Roda · Som · Portaria</span><small>Atualizado em {new Date().toLocaleDateString("pt-BR")}</small></div></div></div>
+      <div className="calendar-board-scroll"><div className={`calendar-share-board mode-${unit.calendar_mode_type_id === 1 ? "simple" : "colors"}`} ref={boardRef}><div className="share-board-heading"><div className="share-board-brand"><div><span>GESTÃO PD</span><h3>{unit.name}</h3></div><strong>Calendário {monthName}</strong></div><div><small>{range === "month" ? "Mês completo" : range === "first" ? "1º quadro · até a 2ª sexta" : "2º quadro · restante do mês"}</small></div></div><table><thead><tr><th>Data</th><th>Roda</th><th>Som</th><th>Portaria</th><th>Observação</th></tr></thead><tbody>{visibleDays.flatMap((date, dayIndex) => { const holiday = isHolidayOn(date, operationExceptions); const rows = classSlots.map((classType, index) => <tr className={holiday ? "board-holiday-row" : `class-${classType.code}`} key={`${date}-${classType.id ?? "simple"}`}>{index === 0 && <td className="board-date-cell board-merged-cell" rowSpan={classSlots.length}>{formatDay(date)}</td>}<td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong></td><td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong></td>{index === 0 && <td className="board-reception-cell board-merged-cell" rowSpan={classSlots.length}><strong>{holiday ? "" : personName(assignmentFor(date, 3, null)?.person_id)}</strong></td>}{index === 0 && <td className="board-note-cell board-merged-cell" rowSpan={classSlots.length}>{holiday ? "FERIADO" : notes.find(item => item.date === date)?.note ?? ""}</td>}</tr>); const showWeek = dayIndex === 0 || calendarWeek(visibleDays[dayIndex - 1]) !== calendarWeek(date); return [<tr className="board-week-row" key={`week-${date}`}><td colSpan={5}>Semana {calendarWeek(date)}</td></tr>, ...rows].filter((_, index) => showWeek || index > 0); })}</tbody></table><div className="share-board-footer"><span>Roda · Som · Portaria</span><small>Atualizado em {new Date().toLocaleDateString("pt-BR")}</small></div></div></div>
     </div>}
   </>;
 }
@@ -636,6 +651,7 @@ function Absences({ role, profile, unitId, minimumTeachers, openingDays, operati
   const [rows, setRows] = useState<AbsenceRow[]>([]);
   const [extraManagerDays, setExtraManagerDays] = useState<ManagerDayRow[]>([]);
   const [monthSubstitutions, setMonthSubstitutions] = useState<SubstitutionRow[]>([]);
+  const [monthOverrides, setMonthOverrides] = useState<DailyOverrideRow[]>([]);
   const [periodOpen, setPeriodOpen] = useState(true);
   const [busyDate, setBusyDate] = useState<string | null>(null);
   const year = monthDate.getFullYear();
@@ -647,21 +663,24 @@ function Absences({ role, profile, unitId, minimumTeachers, openingDays, operati
   useEffect(() => {
     if (!unitId) return;
     const loadMonth = async () => {
-      const [{ data }, { data: periods }, { data: managerDayData }, { data: substitutionData }] = await Promise.all([
+      const [{ data }, { data: periods }, { data: managerDayData }, { data: substitutionData }, { data: overrideData }] = await Promise.all([
         supabase.from("absences").select("id,date,person_id,created_by,created_at").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd).order("date"),
         supabase.from("monthly_periods").select("status").eq("unit_id", unitId).eq("year", year).eq("month", month + 1).limit(1),
         supabase.from("manager_teaching_days").select("id,date,manager_id,created_by").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
         supabase.from("substitutions").select("id,date,substitute_person_id,external_name,external_level,daily_type,created_by").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
+        supabase.from("daily_overrides").select("id,date,person_id,daily_type,created_by").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
       ]);
       if (data) setRows(data as AbsenceRow[]);
       if (managerDayData) setExtraManagerDays(managerDayData as ManagerDayRow[]);
       if (substitutionData) setMonthSubstitutions(substitutionData as SubstitutionRow[]);
+      setMonthOverrides((overrideData as DailyOverrideRow[] | null) ?? []);
       setPeriodOpen(periods?.[0]?.status !== "closed");
     };
     void loadMonth();
   }, [unitId, monthStart, monthEnd, year, month]);
   const isScheduled = (personId: number, date: string) => {
     const weekday = new Date(`${date}T12:00:00`).getDay();
+    if (isHolidayOn(date, operationExceptions)) return role === "gestor" && monthOverrides.some(item => item.person_id === personId && item.date === date);
     return unitIsOpenOn(date, openingDays, operationExceptions) && (schedules.some(schedule => schedule.person_id === personId && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) || extraManagerDays.some(day => day.manager_id === personId && day.date === date));
   };
   const toggle = async (date: string) => {
@@ -683,6 +702,7 @@ function Absences({ role, profile, unitId, minimumTeachers, openingDays, operati
   const selectedRows = rows.filter(row => row.person_id === targetPersonId);
   const coverageAlerts = role === "gestor" ? Array.from({ length: daysInMonth }, (_, index) => index + 1).map(day => {
     const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    if (isHolidayOn(date, operationExceptions)) return { date, present: 0, scheduled: 0 };
     const scheduledTeachers = people.filter(person => person.active && !isPersonType(person, "reception") && isScheduled(person.id, date));
     const presentIds = new Set(scheduledTeachers.filter(person => !rows.some(row => row.person_id === person.id && row.date === date)).map(person => person.id));
     const substitutionsToday = monthSubstitutions.filter(substitution => substitution.date === date);
@@ -693,10 +713,10 @@ function Absences({ role, profile, unitId, minimumTeachers, openingDays, operati
   }).filter(day => day.scheduled > 0 && day.present < minimumTeachers) : [];
   coverageAlerts.splice(0);
   const selectablePeople = people.filter(person => person.active);
-  return <><Title title={role === "gestor" ? "Faltas" : "Minhas faltas"} text="Marque ou desmarque faltas nos dias previstos da escala." />{role === "gestor" && <section className="panel absence-toolbar"><label>Pessoa<select value={selectedPersonId} onChange={event => setSelectedPersonId(Number(event.target.value))}>{selectablePeople.map(person => <option key={person.id} value={person.id}>{displayName(person)}</option>)}</select></label><div><small>Competência</small><strong>{periodOpen ? "Aberta para alterações" : "Fechada"}</strong></div></section>}<div className="panel calendar-panel"><div className="calendar-bar"><button type="button" onClick={() => setMonthDate(new Date(year, month - 1, 1))}>‹</button><strong className="month-name">{monthLabel}</strong><button type="button" onClick={() => setMonthDate(new Date(year, month + 1, 1))}>›</button></div>{!periodOpen && <p className="period-closed">Esta competência está fechada e não permite alterações.</p>}<div className="calendar">{week.map(day => <small key={day}>{day}</small>)}{Array.from({ length: cells }, (_, index) => { const day = index - offset + 1; if (day < 1 || day > daysInMonth) return <i key={index} />; const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`; const scheduled = isScheduled(targetPersonId, date); const absent = selectedRows.some(row => row.date === date); return <button key={date} disabled={!scheduled || !periodOpen || busyDate === date} className={absent ? "absent" : scheduled ? "scheduled" : ""} onClick={() => toggle(date)}><b>{day}</b><span>{absent ? "Falta" : scheduled ? "Trabalho" : unitIsOpenOn(date, openingDays, operationExceptions) ? "Sem escala" : "Fechada"}</span></button>; })}</div><div className="calendar-legend"><span><i className="legend-work" />Dia previsto</span><span><i className="legend-absence" />Falta marcada</span></div></div>{role === "gestor" && coverageAlerts.length > 0 && <section className="panel"><h3>Alertas de cobertura</h3><div className="coverage-list">{coverageAlerts.map(alert => <div className="coverage critical" key={alert.date}><div><strong>{new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" }).format(new Date(`${alert.date}T12:00:00`))}</strong><p>{alert.present} {alert.present === 1 ? "professor presente" : "professores presentes"} · mínimo necessário: 4</p></div></div>)}</div></section>}<section className="panel"><h3>Faltas registradas no mês</h3><div className="table-wrap absence-table"><table><thead><tr><th>Data</th>{role === "gestor" && <th>Pessoa</th>}<th>Registrado por</th><th>Registro</th></tr></thead><tbody>{selectedRows.length ? selectedRows.map(row => <tr key={row.id}><td data-label="Data">{row.date.split("-").reverse().slice(0,2).join("/")}</td>{role === "gestor" && <td data-label="Pessoa">{displayName(people.find(person => person.id === row.person_id))}</td>}<td data-label="Registrado por">{people.find(person => person.id === row.created_by)?.name ?? (row.created_by === profile.id ? profile.name : "—")}</td><td data-label="Registro">{row.created_at ? new Date(row.created_at).toLocaleDateString("pt-BR") : "—"}</td></tr>) : <tr><td colSpan={role === "gestor" ? 4 : 3}>Nenhuma falta registrada nesta competência.</td></tr>}</tbody></table></div></section></>;
+  return <><Title title={role === "gestor" ? "Faltas" : "Minhas faltas"} text="Marque ou desmarque faltas nos dias previstos da escala." />{role === "gestor" && <section className="panel absence-toolbar"><label>Pessoa<select value={selectedPersonId} onChange={event => setSelectedPersonId(Number(event.target.value))}>{selectablePeople.map(person => <option key={person.id} value={person.id}>{displayName(person)}</option>)}</select></label><div><small>Competência</small><strong>{periodOpen ? "Aberta para alterações" : "Fechada"}</strong></div></section>}<div className="panel calendar-panel"><div className="calendar-bar"><button type="button" onClick={() => setMonthDate(new Date(year, month - 1, 1))}>‹</button><strong className="month-name">{monthLabel}</strong><button type="button" onClick={() => setMonthDate(new Date(year, month + 1, 1))}>›</button></div>{!periodOpen && <p className="period-closed">Esta competência está fechada e não permite alterações.</p>}<div className="calendar">{week.map(day => <small key={day}>{day}</small>)}{Array.from({ length: cells }, (_, index) => { const day = index - offset + 1; if (day < 1 || day > daysInMonth) return <i key={index} />; const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`; const holiday = isHolidayOn(date, operationExceptions); const scheduled = isScheduled(targetPersonId, date); const absent = selectedRows.some(row => row.date === date); return <button key={date} disabled={!scheduled || !periodOpen || busyDate === date} className={`${holiday ? "holiday" : ""} ${absent ? "absent" : scheduled ? "scheduled" : ""}`} onClick={() => toggle(date)}><b>{day}</b><span>{absent ? "Falta" : scheduled ? holiday ? "Diária especial" : "Trabalho" : holiday ? "Feriado" : unitIsOpenOn(date, openingDays, operationExceptions) ? "Sem escala" : "Fechada"}</span></button>; })}</div><div className="calendar-legend"><span><i className="legend-work" />Dia previsto</span><span><i className="legend-absence" />Falta marcada</span></div></div>{role === "gestor" && coverageAlerts.length > 0 && <section className="panel"><h3>Alertas de cobertura</h3><div className="coverage-list">{coverageAlerts.map(alert => <div className="coverage critical" key={alert.date}><div><strong>{new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "2-digit" }).format(new Date(`${alert.date}T12:00:00`))}</strong><p>{alert.present} {alert.present === 1 ? "professor presente" : "professores presentes"} · mínimo necessário: 4</p></div></div>)}</div></section>}<section className="panel"><h3>Faltas registradas no mês</h3><div className="table-wrap absence-table"><table><thead><tr><th>Data</th>{role === "gestor" && <th>Pessoa</th>}<th>Registrado por</th><th>Registro</th></tr></thead><tbody>{selectedRows.length ? selectedRows.map(row => <tr key={row.id}><td data-label="Data">{row.date.split("-").reverse().slice(0,2).join("/")}</td>{role === "gestor" && <td data-label="Pessoa">{displayName(people.find(person => person.id === row.person_id))}</td>}<td data-label="Registrado por">{people.find(person => person.id === row.created_by)?.name ?? (row.created_by === profile.id ? profile.name : "—")}</td><td data-label="Registro">{row.created_at ? new Date(row.created_at).toLocaleDateString("pt-BR") : "—"}</td></tr>) : <tr><td colSpan={role === "gestor" ? 4 : 3}>Nenhuma falta registrada nesta competência.</td></tr>}</tbody></table></div></section></>;
 }
 
-function Solo({ role, profile, unitId, classes, people, schedules, substitutions, rows, setRows }: { role: Role; profile: Profile; unitId: number | null; classes: ClassRow[]; people: PersonRow[]; schedules: ScheduleRow[]; substitutions: SubstitutionRow[]; rows: SoloRow[]; setRows: (v: SoloRow[]) => void }) {
+function Solo({ role, profile, unitId, classes, people, schedules, operationExceptions, substitutions, rows, setRows }: { role: Role; profile: Profile; unitId: number | null; classes: ClassRow[]; people: PersonRow[]; schedules: ScheduleRow[]; operationExceptions: OperationExceptionRow[]; substitutions: SubstitutionRow[]; rows: SoloRow[]; setRows: (v: SoloRow[]) => void }) {
   const today = new Date();
   const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
   const [recordDate, setRecordDate] = useState(todayIso);
@@ -716,6 +736,7 @@ function Solo({ role, profile, unitId, classes, people, schedules, substitutions
     const checkDay = async () => {
       const selected = new Date(`${recordDate}T12:00:00`);
       const weekday = selected.getDay();
+      const holiday = isHolidayOn(recordDate, operationExceptions);
       const [{ data: overrideData }, { data: absenceData }, { data: periodData }, { data: scheduleData }, { data: substitutionData }] = await Promise.all([
         supabase.from("daily_overrides").select("daily_type").eq("unit_id", unitId).eq("person_id", targetTeacherId).eq("date", recordDate).limit(1),
         supabase.from("absences").select("id").eq("unit_id", unitId).eq("person_id", targetTeacherId).eq("date", recordDate).limit(1),
@@ -732,11 +753,11 @@ function Solo({ role, profile, unitId, classes, people, schedules, substitutions
       const open = periodData?.[0]?.status !== "closed";
       setPeriodOpen(open);
       setDailyType(normalizedType);
-      setCanRecord(Boolean(open && !absenceData?.length && normalizedType && recordDate <= todayIso));
-      setMessage(!open ? "Esta competência está fechada." : absenceData?.length ? "Existe uma falta registrada nesta data." : !normalizedType ? "A data não possui escala, substituição ou ajuste de diária." : recordDate > todayIso ? "Aulas solo só podem ser registradas hoje ou em datas passadas." : "");
+      setCanRecord(Boolean(open && !absenceData?.length && normalizedType && recordDate <= todayIso && (!holiday || role === "gestor")));
+      setMessage(!open ? "Esta competência está fechada." : holiday && role !== "gestor" ? "Aulas solo em feriados só podem ser registradas pela gestão." : absenceData?.length ? "Existe uma falta registrada nesta data." : !normalizedType ? holiday ? "Marque primeiro uma diária para este feriado." : "A data não possui escala, substituição ou ajuste de diária." : recordDate > todayIso ? "Aulas solo só podem ser registradas hoje ou em datas passadas." : "");
     };
     void checkDay();
-  }, [unitId, targetTeacherId, recordDate, schedules, substitutions, todayIso]);
+  }, [unitId, targetTeacherId, recordDate, schedules, substitutions, operationExceptions, role, todayIso]);
   const monthPrefix = `${viewMonth.getFullYear()}-${String(viewMonth.getMonth() + 1).padStart(2,"0")}`;
   const visibleRows = rows.filter(row => (role === "professor" ? row.teacher_id === profile.id : true) && row.date.startsWith(monthPrefix));
   const rowsOnDate = rows.filter(row => row.teacher_id === targetTeacherId && row.date === recordDate);
@@ -782,7 +803,7 @@ function SoloCalendar({ month, rows, role, profile }: { month: Date; rows: SoloR
   })}</div></section>;
 }
 
-function Substitutions({ profile, unitId, openingDays, people, rows, setRows }: { profile: Profile; unitId: number | null; openingDays: boolean[]; people: PersonRow[]; rows: SubstitutionRow[]; setRows: (v: SubstitutionRow[]) => void }) {
+function Substitutions({ profile, unitId, openingDays, operationExceptions, people, rows, setRows }: { profile: Profile; unitId: number | null; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; rows: SubstitutionRow[]; setRows: (v: SubstitutionRow[]) => void }) {
   const today = new Date().toISOString().slice(0,10);
   const [managerDays, setManagerDays] = useState<ManagerDayRow[]>([]);
   const [overrides, setOverrides] = useState<DailyOverrideRow[]>([]);
@@ -810,12 +831,14 @@ function Substitutions({ profile, unitId, openingDays, people, rows, setRows }: 
     };
     void load();
   }, [unitId]);
-  const canChangeDate = async (date: string) => {
+  const canChangeDate = async (date: string, allowHoliday = false) => {
     if (!unitId) return false;
     const currentMonth = new Date(); currentMonth.setDate(1); currentMonth.setHours(0,0,0,0);
     const selectedMonth = new Date(`${date.slice(0,7)}-01T12:00:00`);
     if (selectedMonth < currentMonth) { setMessage("Não é possível incluir registros em meses anteriores ao vigente."); return false; }
-    if (!openingDays[new Date(`${date}T12:00:00`).getDay()]) { setMessage("A unidade está configurada como fechada nesta data."); return false; }
+    const holiday = isHolidayOn(date, operationExceptions);
+    if (holiday && !allowHoliday) { setMessage("Use Ajuste de diária para registrar trabalho em feriados."); return false; }
+    if (!holiday && !unitIsOpenOn(date, openingDays, operationExceptions)) { setMessage("A unidade está configurada como fechada nesta data."); return false; }
     const selected = new Date(`${date}T12:00:00`);
     const { data } = await supabase.from("monthly_periods").select("status").eq("unit_id", unitId).eq("year", selected.getFullYear()).eq("month", selected.getMonth() + 1).limit(1);
     if (data?.[0]?.status === "closed") { setMessage("Esta competência está fechada e não permite alterações."); return false; }
@@ -837,12 +860,12 @@ function Substitutions({ profile, unitId, openingDays, people, rows, setRows }: 
   };
   const deleteManagerDay = async (row: ManagerDayRow) => { if (!(await canChangeDate(row.date))) return; const { error } = await supabase.from("manager_teaching_days").delete().eq("id", row.id); if (!error) setManagerDays(managerDays.filter(item => item.id !== row.id)); };
   const saveOverride = async () => {
-    if (!unitId || !overridePersonId || !(await canChangeDate(overrideDate))) return;
+    if (!unitId || !overridePersonId || !(await canChangeDate(overrideDate, true))) return;
     const payload = { unit_id: unitId, person_id: overridePersonId, date: overrideDate, daily_type: overrideType, created_by: profile.id };
     const { data, error } = await supabase.from("daily_overrides").upsert(payload, { onConflict: "unit_id,person_id,date" }).select("id,date,person_id,daily_type,created_by").single();
     if (!error && data) { const saved = data as DailyOverrideRow; setOverrides([saved, ...overrides.filter(row => row.id !== saved.id)]); }
   };
-  const deleteOverride = async (row: DailyOverrideRow) => { if (!(await canChangeDate(row.date))) return; const { error } = await supabase.from("daily_overrides").delete().eq("id", row.id); if (!error) setOverrides(overrides.filter(item => item.id !== row.id)); };
+  const deleteOverride = async (row: DailyOverrideRow) => { if (!(await canChangeDate(row.date, true))) return; const { error } = await supabase.from("daily_overrides").delete().eq("id", row.id); if (!error) setOverrides(overrides.filter(item => item.id !== row.id)); };
   const teachers = people.filter(person => person.active && (isPersonType(person, "teacher") || isPersonType(person, "intern")));
   const managers = people.filter(person => person.active && isPersonType(person, "manager"));
   const dailyPeople = people.filter(person => person.active && !isPersonType(person, "manager"));
@@ -911,6 +934,8 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     let total = 0;
     let complete = 0;
     const scheduledDays = days.filter(date => {
+      const override = overrides.find(item => item.person_id === person.id && item.date === date);
+      if (isHolidayOn(date, operationExceptions)) return Boolean(override) && !absences.some(absence => absence.person_id === person.id && absence.date === date);
       if (!unitIsOpenOn(date, openingDays, operationExceptions)) return false;
       const weekday = new Date(`${date}T12:00:00`).getDay();
       return schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) && !absences.some(absence => absence.person_id === person.id && absence.date === date);
@@ -1138,7 +1163,7 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
   const saveOperationException = async () => {
     if (!unitId || !exceptionDate) return;
     setExceptionMessage("");
-    const payload = { unit_id: unitId, date: exceptionDate, open: exceptionOpen, label: exceptionLabel.trim() || null };
+    const payload = { unit_id: unitId, date: exceptionDate, open: exceptionOpen, label: exceptionOpen ? exceptionLabel.trim() || null : "FERIADO" };
     const { data, error } = await supabase.from("operation_exceptions").upsert(payload, { onConflict: "unit_id,date" }).select("id,date,open,label").single();
     if (error || !data) { setExceptionMessage("Não foi possível salvar esta configuração."); return; }
     const next = [...operationExceptions.filter(item => item.date !== data.date), data as OperationExceptionRow].sort((a,b) => a.date.localeCompare(b.date));
@@ -1227,10 +1252,10 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
       <div className="table-wrap schedule-table"><table><thead><tr><th>Pessoa</th><th>Dias da semana</th><th>Diária</th><th>Ação</th></tr></thead><tbody>{scheduleGroups.length ? scheduleGroups.map(group => { const person = people.find(p => p.id === group.personId); const days = Array.from(new Set(group.rows.map(row => row.weekday))).sort((a,b) => [1,2,3,4,5,6,0].indexOf(a) - [1,2,3,4,5,6,0].indexOf(b)); const editing = editingSchedulePersonId === group.personId; return <Fragment key={group.personId}><tr><td data-label="Pessoa"><strong>{displayName(person)}</strong></td><td data-label="Dias da semana"><div className="schedule-days">{days.map(day => <span key={day}>{week[day]}</span>)}</div></td><td data-label="Diária">{group.rows[0]?.daily_type === "manager_support" ? "Dia de aula" : group.rows[0]?.daily_type === "full" ? "Completa" : "Meia"}</td><td data-label="Ação"><div className="schedule-actions">{group.active ? <><button type="button" className="edit-action" onClick={() => editing ? setEditingSchedulePersonId(null) : startScheduleEdit(group)}>{editing ? "Cancelar" : "Editar"}</button><button type="button" className="end-action" onClick={() => closeSchedule(group.personId)}>Encerrar hoje</button></> : <span>Vínculo encerrado</span>}</div></td></tr>{editing && <tr className="schedule-edit-row"><td colSpan={4}><div className="schedule-edit"><fieldset className="weekday-multi"><legend>Dias da semana</legend><div>{availableScheduleWeekdays.map(index => <button key={index} type="button" className={editScheduleWeekdays.includes(index) ? "selected" : ""} onClick={() => setEditScheduleWeekdays(current => current.includes(index) ? current.filter(day => day !== index) : [...current, index])}>{week[index]}</button>)}</div></fieldset><label>Tipo de diária<select value={editScheduleDailyType} onChange={event => setEditScheduleDailyType(event.target.value)} disabled={person ? isPersonType(person, "manager") : false}><option value="full">Completa</option><option value="half">Meia</option></select></label><button type="button" className="primary" disabled={!editScheduleWeekdays.some(index => openingDays[index])} onClick={() => saveScheduleEdit(group.personId)}>Salvar alterações</button></div></td></tr>}</Fragment> }) : <tr><td colSpan={4}>Nenhuma escala cadastrada.</td></tr>}</tbody></table></div>
     </div></details>
     <details className="panel collapsible parameters-open-days"><summary><div><h3>Dias de funcionamento da unidade</h3><p>Defina em quais dias da semana esta unidade abre regularmente.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content"><div className="weekday-toggles">{week.map((day, index) => <button key={day} className={openingDays[index] ? "selected" : ""} onClick={() => toggleDay(index)}><small>{day}</small><strong>{openingDays[index] ? "Aberta" : "Fechada"}</strong></button>)}</div><p className="hint">Aberturas e fechamentos excepcionais continuarão disponíveis no calendário de funcionamento.</p></div></details>
-    <details className="panel collapsible operation-section parameters-holidays"><summary><div><h3>Feriados e funcionamento</h3><p>Registre aberturas e fechamentos excepcionais por data.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
-      <div className="operation-form exception-form"><label>Data<input type="date" min={currentMonthStart} value={exceptionDate} onChange={event => setExceptionDate(event.target.value)} /></label><label>Funcionamento<select value={exceptionOpen ? "open" : "closed"} onChange={event => setExceptionOpen(event.target.value === "open")}><option value="closed">Unidade fechada</option><option value="open">Unidade aberta</option></select></label><label>Identificação (opcional)<input value={exceptionLabel} onChange={event => setExceptionLabel(event.target.value)} placeholder="Ex.: feriado municipal" /></label><button type="button" className="primary" onClick={saveOperationException}>Salvar configuração</button></div>
+    <details className="panel collapsible operation-section parameters-holidays"><summary><div><h3>Feriados e funcionamento</h3><p>Registre feriados ou aberturas excepcionais por data.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
+      <div className="operation-form exception-form"><label>Data<input type="date" min={currentMonthStart} value={exceptionDate} onChange={event => setExceptionDate(event.target.value)} /></label><label>Funcionamento<select value={exceptionOpen ? "open" : "closed"} onChange={event => { const open = event.target.value === "open"; setExceptionOpen(open); setExceptionLabel(open ? "" : "FERIADO"); }}><option value="closed">Feriado</option><option value="open">Unidade aberta excepcionalmente</option></select></label><label>Identificação<input value={exceptionOpen ? exceptionLabel : "FERIADO"} disabled={!exceptionOpen} onChange={event => setExceptionLabel(event.target.value)} placeholder="Motivo da abertura" /></label><button type="button" className="primary" onClick={saveOperationException}>Salvar configuração</button></div>
       {exceptionMessage && <p className="operation-message">{exceptionMessage}</p>}
-      <OperationTable headers={["Data","Funcionamento","Identificação","Ação"]} rows={operationExceptions.map(row => [row.date.split("-").reverse().join("/"), row.open ? "Aberta" : "Fechada", row.label ?? "—", <div className="row-actions" key={row.id}><button className="delete-action" onClick={() => deleteOperationException(row)}>Excluir</button></div>])} />
+      <OperationTable headers={["Data","Funcionamento","Identificação","Ação"]} rows={operationExceptions.map(row => [row.date.split("-").reverse().join("/"), row.open ? "Aberta excepcionalmente" : "Feriado", row.label ?? "—", <div className="row-actions" key={row.id}><button className="delete-action" onClick={() => deleteOperationException(row)}>Excluir</button></div>])} />
     </div></details>
     <details className="panel collapsible operation-section parameters-periods"><summary><div><h3>Competências</h3><p>Fechamento automático D+1 útil e reaberturas controladas.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
       <div className="competency-note"><strong>Fechamento automático ativo</strong><span>A rotina verifica as competências a cada hora e fecha no primeiro dia útil após o fim do mês.</span></div>

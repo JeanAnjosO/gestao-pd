@@ -46,6 +46,7 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(constants, /export const PERSON_TYPES/);
   assert.match(constants, /WEB_INACTIVITY_MS = 2 \* 60 \* 60 \* 1000/);
   assert.match(utils, /export const scheduleAppliesOn/);
+  assert.match(utils, /export const isHolidayOn/);
   assert.match(utils, /schedule\.starts_on <= date/);
   assert.doesNotMatch(utils, /starts_on\.slice/);
   assert.match(page, /replace_schedule_from_date/);
@@ -61,6 +62,13 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /new Set\(\[\.\.\.teamAbsentNames, \.\.\.fixedReceptionAbsentNames\]\)/);
   assert.match(page, /\.eq\("assignment_type_id", ASSIGNMENT_TYPES\.reception\)/);
   assert.match(page, /const present = presentNames\.length/);
+  assert.match(page, /className="overview-day holiday-day"/);
+  assert.match(page, /if \(isHolidayOn\(date, operationExceptions\)\) return \{ date, scheduled: 0, present: 0 \}/);
+  assert.match(page, /const operationalDays = days\.filter\(date => !isHolidayOn/);
+  assert.match(page, /holiday \? "FERIADO"/);
+  assert.match(page, /role === "gestor" && monthOverrides\.some/);
+  assert.match(page, /holiday && role !== "gestor"/);
+  assert.match(page, /isHolidayOn\(date, operationExceptions\)\) return Boolean\(override\)/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
   assert.match(ui, /export function Table/);
 });
