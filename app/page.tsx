@@ -376,10 +376,9 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
       if (role === "gestor") {
         if (holiday) {
           const holidayDaily = overrides.filter(item => item.date === date).map(item => `${personName(item.person_id)} (${item.daily_type === "full" ? "completa" : "meia"})`);
-          const holidayAbsences = Array.from(new Set(absences.filter(item => item.date === date).map(item => personName(item.person_id))));
           const holidaySoloPeople = Array.from(new Map(daySolo.map(row => [row.teacher_id, row.people ? displayName(row.people) : personName(row.teacher_id)])).values());
-          const holidayLabel = `${day}: feriado${holidayDaily.length ? `, diárias: ${holidayDaily.join(", ")}` : ""}${holidayAbsences.length ? `, faltas: ${holidayAbsences.join(", ")}` : ""}${holidaySoloPeople.length ? `, aulas solo: ${holidaySoloPeople.join(", ")}` : ""}`;
-          return <div tabIndex={0} aria-label={holidayLabel} className="overview-day holiday-day" key={date}><b>{day}</b>{holidaySoloPeople.length > 0 && <><span className="overview-solo-names">{holidaySoloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{holidaySoloPeople.length}</span></>}<span className="day-popover"><strong>Feriado</strong><small>{holidayDaily.length ? `Diárias: ${holidayDaily.join(", ")}` : "Nenhuma diária marcada"}</small>{holidayAbsences.length > 0 && <small>Faltas: {holidayAbsences.join(", ")}</small>}{holidaySoloPeople.length > 0 && <small>Aulas solo: {holidaySoloPeople.join(", ")}</small>}</span></div>;
+          const holidayLabel = `${day}: feriado${holidayDaily.length ? `, presenças: ${holidayDaily.join(", ")}` : ""}${holidaySoloPeople.length ? `, aulas solo: ${holidaySoloPeople.join(", ")}` : ""}`;
+          return <div tabIndex={0} aria-label={holidayLabel} className="overview-day holiday-day" key={date}><b>{day}</b>{holidaySoloPeople.length > 0 && <><span className="overview-solo-names">{holidaySoloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{holidaySoloPeople.length}</span></>}<span className="day-popover"><strong>Feriado</strong><small>{holidayDaily.length ? `Presenças: ${holidayDaily.join(", ")}` : "Nenhuma presença marcada"}</small>{holidaySoloPeople.length > 0 && <small>Aulas solo: {holidaySoloPeople.join(", ")}</small>}</span></div>;
         }
         const scheduled = people.filter(person => person.active && !isPersonType(person, "reception") && unitOpen && (schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) || managerDays.some(extra => extra.manager_id === person.id && extra.date === date)));
         const absentIds = new Set(absences.filter(row => row.date === date).map(row => row.person_id));
@@ -651,7 +650,6 @@ function Absences({ role, profile, unitId, minimumTeachers, openingDays, operati
   const [rows, setRows] = useState<AbsenceRow[]>([]);
   const [extraManagerDays, setExtraManagerDays] = useState<ManagerDayRow[]>([]);
   const [monthSubstitutions, setMonthSubstitutions] = useState<SubstitutionRow[]>([]);
-  const [monthOverrides, setMonthOverrides] = useState<DailyOverrideRow[]>([]);
   const [periodOpen, setPeriodOpen] = useState(true);
   const [busyDate, setBusyDate] = useState<string | null>(null);
   const year = monthDate.getFullYear();
@@ -663,24 +661,22 @@ function Absences({ role, profile, unitId, minimumTeachers, openingDays, operati
   useEffect(() => {
     if (!unitId) return;
     const loadMonth = async () => {
-      const [{ data }, { data: periods }, { data: managerDayData }, { data: substitutionData }, { data: overrideData }] = await Promise.all([
+      const [{ data }, { data: periods }, { data: managerDayData }, { data: substitutionData }] = await Promise.all([
         supabase.from("absences").select("id,date,person_id,created_by,created_at").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd).order("date"),
         supabase.from("monthly_periods").select("status").eq("unit_id", unitId).eq("year", year).eq("month", month + 1).limit(1),
         supabase.from("manager_teaching_days").select("id,date,manager_id,created_by").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
         supabase.from("substitutions").select("id,date,substitute_person_id,external_name,external_level,daily_type,created_by").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
-        supabase.from("daily_overrides").select("id,date,person_id,daily_type,created_by").eq("unit_id", unitId).gte("date", monthStart).lte("date", monthEnd),
       ]);
       if (data) setRows(data as AbsenceRow[]);
       if (managerDayData) setExtraManagerDays(managerDayData as ManagerDayRow[]);
       if (substitutionData) setMonthSubstitutions(substitutionData as SubstitutionRow[]);
-      setMonthOverrides((overrideData as DailyOverrideRow[] | null) ?? []);
       setPeriodOpen(periods?.[0]?.status !== "closed");
     };
     void loadMonth();
   }, [unitId, monthStart, monthEnd, year, month]);
   const isScheduled = (personId: number, date: string) => {
     const weekday = new Date(`${date}T12:00:00`).getDay();
-    if (isHolidayOn(date, operationExceptions)) return role === "gestor" && monthOverrides.some(item => item.person_id === personId && item.date === date);
+    if (isHolidayOn(date, operationExceptions)) return false;
     return unitIsOpenOn(date, openingDays, operationExceptions) && (schedules.some(schedule => schedule.person_id === personId && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) || extraManagerDays.some(day => day.manager_id === personId && day.date === date));
   };
   const toggle = async (date: string) => {

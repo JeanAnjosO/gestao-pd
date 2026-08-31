@@ -66,7 +66,7 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /if \(isHolidayOn\(date, operationExceptions\)\) return \{ date, scheduled: 0, present: 0 \}/);
   assert.match(page, /const operationalDays = days\.filter\(date => !isHolidayOn/);
   assert.match(page, /holiday \? "FERIADO"/);
-  assert.match(page, /role === "gestor" && monthOverrides\.some/);
+  assert.match(page, /if \(isHolidayOn\(date, operationExceptions\)\) return false/);
   assert.match(page, /holiday && role !== "gestor"/);
   assert.match(page, /isHolidayOn\(date, operationExceptions\)\) return Boolean\(override\)/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
