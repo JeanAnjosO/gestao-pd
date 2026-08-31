@@ -273,6 +273,7 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
   const [overviewAbsences, setOverviewAbsences] = useState<AbsenceRow[]>([]);
   const [overviewManagerDays, setOverviewManagerDays] = useState<ManagerDayRow[]>([]);
   const [overviewSubstitutions, setOverviewSubstitutions] = useState<SubstitutionRow[]>([]);
+  const [overviewReceptionAssignments, setOverviewReceptionAssignments] = useState<CalendarAssignmentRow[]>([]);
   const [overviewPeriodStatus, setOverviewPeriodStatus] = useState<"open" | "closed">("open");
   const currentMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const [managerMonthOffset, setManagerMonthOffset] = useState<0 | 1>(0);
@@ -285,15 +286,17 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
     if (!unitId) return;
     const loadCoverage = async () => {
       setOverviewPeriodStatus("open");
-      const [{ data: absenceData }, { data: managerData }, { data: substitutionData }, { data: periodData }] = await Promise.all([
+      const [{ data: absenceData }, { data: managerData }, { data: substitutionData }, { data: receptionData }, { data: periodData }] = await Promise.all([
         supabase.from("absences").select("id,date,person_id,created_by,created_at").eq("unit_id", unitId).gte("date", start).lte("date", end),
         supabase.from("manager_teaching_days").select("id,date,manager_id,created_by").eq("unit_id", unitId).gte("date", start).lte("date", end),
         supabase.from("substitutions").select("id,date,substitute_person_id,external_name,external_level,daily_type,created_by").eq("unit_id", unitId).gte("date", start).lte("date", end),
+        supabase.from("calendar_assignments").select("id,date,assignment_type_id,class_type_id,person_id,manually_assigned").eq("unit_id", unitId).eq("assignment_type_id", ASSIGNMENT_TYPES.reception).gte("date", start).lte("date", end),
         supabase.from("monthly_periods").select("status").eq("unit_id", unitId).eq("year", year).eq("month", month + 1).limit(1),
       ]);
       if (absenceData) setOverviewAbsences(absenceData as AbsenceRow[]);
       if (managerData) setOverviewManagerDays(managerData as ManagerDayRow[]);
       if (substitutionData) setOverviewSubstitutions(substitutionData as SubstitutionRow[]);
+      setOverviewReceptionAssignments((receptionData as CalendarAssignmentRow[] | null) ?? []);
       if (periodData?.[0]?.status) setOverviewPeriodStatus(periodData[0].status as "open" | "closed");
     };
     void loadCoverage();
@@ -312,7 +315,7 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
     const accountedDates = new Set([...scheduledDates.filter(date => !absenceDates.has(date)), ...substitutionDates]);
     const personSolo = soloRows.filter(row => row.teacher_id === profile.id && row.date >= start && row.date <= end);
     const pendingPersonSolo = personSolo.filter(row => row.status === "pending").length;
-    return <><Title title={`Olá, ${profile.name.split(" ")[0]}`} text={`Seu resumo de ${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}.`} /><div className={`stats ${role === "professor" ? "stats-four" : ""}`}><Stat label="Dias previstos" value={String(scheduledDates.length)} /><Stat label="Faltas" value={String(absenceDates.size)} /><Stat label="Dias contabilizados" value={String(accountedDates.size)} />{role === "professor" && <Stat label="Aulas solo no mês" value={String(personSolo.length)} detail={pendingPersonSolo ? `${pendingPersonSolo} aguardando aprovação` : "Nenhuma pendente"} />}</div><TodayOperations unitId={unitId} people={people} /><OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} soloRows={soloRows} /></>;
+    return <><Title title={`Olá, ${profile.name.split(" ")[0]}`} text={`Seu resumo de ${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}.`} /><div className={`stats ${role === "professor" ? "stats-four" : ""}`}><Stat label="Dias previstos" value={String(scheduledDates.length)} /><Stat label="Faltas" value={String(absenceDates.size)} /><Stat label="Dias contabilizados" value={String(accountedDates.size)} />{role === "professor" && <Stat label="Aulas solo no mês" value={String(personSolo.length)} detail={pendingPersonSolo ? `${pendingPersonSolo} aguardando aprovação` : "Nenhuma pendente"} />}</div><TodayOperations unitId={unitId} people={people} /><OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} receptionAssignments={overviewReceptionAssignments} soloRows={soloRows} /></>;
   }
   const coverageAlerts = Array.from({ length: daysInMonth }, (_, index) => index + 1).map(day => {
     const date = `${year}-${String(month + 1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
@@ -326,7 +329,7 @@ function Overview({ role, profile, unitId, minimumTeachers, openingDays, operati
     return { date, scheduled: scheduled.length, present };
   }).filter(day => day.scheduled > 0 && day.present < minimumTeachers);
   const pendingSolo = soloRows.filter(row => row.status === "pending" && row.date >= start && row.date <= end).length;
-  return <><div className="overview-month-switch" role="group" aria-label="Mês exibido na visão geral"><button type="button" className={managerMonthOffset === 0 ? "active" : ""} aria-pressed={managerMonthOffset === 0} onClick={() => setManagerMonthOffset(0)}>Mês atual</button><button type="button" className={managerMonthOffset === 1 ? "active" : ""} aria-pressed={managerMonthOffset === 1} onClick={() => setManagerMonthOffset(1)}>Próximo mês</button></div><Title title="Visão geral" text={`${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}`} action="Revisar pendências" onAction={onReviewPending} /><div className="stats"><Stat label="Cobertura crítica" value={`${coverageAlerts.length} ${coverageAlerts.length === 1 ? "dia" : "dias"}`} tone={coverageAlerts.length ? "danger" : undefined} /><Stat label="Aulas solo pendentes" value={String(pendingSolo)} /><Stat label="Fechamento automático" value="D+1 útil" detail="Após o fim da competência" /></div>{managerMonthOffset === 0 && <TodayOperations unitId={unitId} people={people} />}<OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} soloRows={soloRows} /></>;
+  return <><div className="overview-month-switch" role="group" aria-label="Mês exibido na visão geral"><button type="button" className={managerMonthOffset === 0 ? "active" : ""} aria-pressed={managerMonthOffset === 0} onClick={() => setManagerMonthOffset(0)}>Mês atual</button><button type="button" className={managerMonthOffset === 1 ? "active" : ""} aria-pressed={managerMonthOffset === 1} onClick={() => setManagerMonthOffset(1)}>Próximo mês</button></div><Title title="Visão geral" text={`${monthTitle} · competência ${overviewPeriodStatus === "closed" ? "fechada" : "aberta"}`} action="Revisar pendências" onAction={onReviewPending} /><div className="stats"><Stat label="Cobertura crítica" value={`${coverageAlerts.length} ${coverageAlerts.length === 1 ? "dia" : "dias"}`} tone={coverageAlerts.length ? "danger" : undefined} /><Stat label="Aulas solo pendentes" value={String(pendingSolo)} /><Stat label="Fechamento automático" value="D+1 útil" detail="Após o fim da competência" /></div>{managerMonthOffset === 0 && <TodayOperations unitId={unitId} people={people} />}<OverviewCalendar role={role} profile={profile} month={viewMonth} minimumTeachers={minimumTeachers} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} absences={overviewAbsences} managerDays={overviewManagerDays} substitutions={overviewSubstitutions} receptionAssignments={overviewReceptionAssignments} soloRows={soloRows} /></>;
 }
 
 function TodayOperations({ unitId, people }: { unitId: number | null; people: PersonRow[] }) {
@@ -352,7 +355,7 @@ function TodayOperations({ unitId, people }: { unitId: number | null; people: Pe
   return <section className="panel today-operations"><div><small>FUNÇÕES DE HOJE</small><h3>{new Intl.DateTimeFormat("pt-BR", { weekday: "long", day: "2-digit", month: "long" }).format(new Date(`${today}T12:00:00`))}</h3>{note && <p>{note}</p>}</div><div className="today-operation-grid">{classIds.map(classId => <div key={classId ?? "simple"}>{classId && <span className={`class-marker ${CLASS_TYPES.find(item => item.id === classId)?.code ?? ""}`}>{CLASS_TYPES.find(item => item.id === classId)?.label}</span>}<small>Roda</small><strong>{getName(1, classId)}</strong><small>Som</small><strong>{getName(2, classId)}</strong></div>)}<div className="today-reception"><small>Portaria</small><strong>{getName(3, null)}</strong></div></div></section>;
 }
 
-function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, operationExceptions, people, schedules, absences, managerDays, substitutions, soloRows }: { role: Role; profile: Profile; month: Date; minimumTeachers: number; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[]; absences: AbsenceRow[]; managerDays: ManagerDayRow[]; substitutions: SubstitutionRow[]; soloRows: SoloRow[] }) {
+function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, operationExceptions, people, schedules, absences, managerDays, substitutions, receptionAssignments, soloRows }: { role: Role; profile: Profile; month: Date; minimumTeachers: number; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[]; absences: AbsenceRow[]; managerDays: ManagerDayRow[]; substitutions: SubstitutionRow[]; receptionAssignments: CalendarAssignmentRow[]; soloRows: SoloRow[] }) {
   const year = month.getFullYear(), monthIndex = month.getMonth(), days = new Date(year, monthIndex + 1, 0).getDate(), offset = new Date(year, monthIndex, 1).getDay(), cells = Math.ceil((offset + days) / 7) * 7;
   const personName = (id: number) => { const person = people.find(item => item.id === id); return person ? displayName(person) : "Pessoa cadastrada"; };
   return <section className="panel overview-calendar-panel">
@@ -373,12 +376,16 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
         const externalNames = Array.from(new Set(todaySubs.filter(row => !row.substitute_person_id && row.external_name).map(row => row.external_name!.trim())));
         const presentNames = [...Array.from(presentIds).map(personName), ...externalNames];
         const absentNames = scheduled.filter(person => absentIds.has(person.id)).map(person => displayName(person));
+        const receptionAssignment = receptionAssignments.find(row => row.date === date);
+        const receptionName = receptionAssignment ? personName(receptionAssignment.person_id) : unitOpen ? "Não definida" : "Unidade fechada";
+        const receptionAbsent = Boolean(receptionAssignment && absentIds.has(receptionAssignment.person_id));
+        const receptionLabel = `Recepção: ${receptionName}${receptionAbsent ? " (falta)" : ""}`;
         const present = presentNames.length;
         const hasCoverage = scheduled.length > 0 || todaySubs.length > 0;
         const critical = hasCoverage && present < minimumTeachers;
         const soloPeople = Array.from(new Map(daySolo.map(row => [row.teacher_id, row.people ? displayName(row.people) : personName(row.teacher_id)])).values());
-        const label = `${day}: ${present} presentes, mínimo ${minimumTeachers}${absentNames.length ? `, ${absentNames.length} faltas` : ""}${soloPeople.length ? `, ${soloPeople.length} com aula solo` : ""}`;
-        return <div tabIndex={0} aria-label={label} className={`overview-day ${hasCoverage ? critical ? "coverage-critical" : "coverage-regular" : ""}`} key={date}><b>{day}</b>{soloPeople.length > 0 && <><span className="overview-solo-names">{soloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{soloPeople.length}</span></>}<span className="day-popover"><strong>{present} presentes · mínimo {minimumTeachers}</strong><small>{presentNames.length ? `Presentes: ${presentNames.join(", ")}` : "Nenhuma presença prevista"}</small>{absentNames.length > 0 && <small>Faltas: {absentNames.join(", ")}</small>}{soloPeople.length > 0 && <small>Aulas solo: {soloPeople.join(", ")}</small>}</span></div>;
+        const label = `${day}: ${present} presentes, mínimo ${minimumTeachers}, ${receptionLabel}${absentNames.length ? `, ${absentNames.length} faltas na equipe` : ""}${soloPeople.length ? `, ${soloPeople.length} com aula solo` : ""}`;
+        return <div tabIndex={0} aria-label={label} className={`overview-day ${hasCoverage ? critical ? "coverage-critical" : "coverage-regular" : ""}`} key={date}><b>{day}</b>{soloPeople.length > 0 && <><span className="overview-solo-names">{soloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{soloPeople.length}</span></>}<span className="day-popover"><strong>{present} presentes · mínimo {minimumTeachers}</strong><small>{presentNames.length ? `Presentes: ${presentNames.join(", ")}` : "Nenhuma presença prevista"}</small><small>{receptionLabel}</small>{absentNames.length > 0 && <small>Faltas: {absentNames.join(", ")}</small>}{soloPeople.length > 0 && <small>Aulas solo: {soloPeople.join(", ")}</small>}</span></div>;
       }
       const scheduled = unitOpen && schedules.some(schedule => schedule.person_id === profile.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date));
       const absent = absences.some(row => row.person_id === profile.id && row.date === date);
