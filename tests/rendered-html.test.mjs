@@ -72,7 +72,8 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /canChangeDate\(managerDate, true\)/);
   assert.match(page, /canChangeDate\(row\.date, true\)/);
   assert.match(page, /isPersonType\(selectedOverridePerson, "intern"\).*Diária de estágio/);
-  assert.match(page, /holidayManagers\.map\(name => `\$\{name\} \(gestor\)`\)/);
+  assert.match(page, /const holidayPresence = \[\.\.\.holidayDaily, \.\.\.holidayManagers\]/);
+  assert.match(page, /const configuredDailyType = schedules\.find\(item => item\.person_id === person\.id && scheduleAppliesOn\(item, date\)\)\?\.daily_type/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
   assert.match(ui, /export function Table/);
 });

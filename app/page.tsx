@@ -375,9 +375,9 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
       const daySolo = soloRows.filter(row => row.date === date);
       if (role === "gestor") {
         if (holiday) {
-          const holidayDaily = overrides.filter(item => item.date === date).map(item => `${personName(item.person_id)} (${item.daily_type === "full" ? "completa" : "meia"})`);
+          const holidayDaily = overrides.filter(item => item.date === date).map(item => personName(item.person_id));
           const holidayManagers = managerDays.filter(item => item.date === date).map(item => personName(item.manager_id));
-          const holidayPresence = [...holidayDaily, ...holidayManagers.map(name => `${name} (gestor)`)];
+          const holidayPresence = [...holidayDaily, ...holidayManagers];
           const holidaySoloPeople = Array.from(new Map(daySolo.map(row => [row.teacher_id, row.people ? displayName(row.people) : personName(row.teacher_id)])).values());
           const holidayLabel = `${day}: feriado${holidayPresence.length ? `, presenças: ${holidayPresence.join(", ")}` : ""}${holidaySoloPeople.length ? `, aulas solo: ${holidaySoloPeople.join(", ")}` : ""}`;
           return <div tabIndex={0} aria-label={holidayLabel} className="overview-day holiday-day" key={date}><b>{day}</b>{holidaySoloPeople.length > 0 && <><span className="overview-solo-names">{holidaySoloPeople.map((name, i) => <em className={`solo-person color-${i % 6}`} key={name}>{name}</em>)}</span><span className="mobile-day-count">{holidaySoloPeople.length}</span></>}<span className="day-popover"><strong>Feriado</strong><small>{holidayPresence.length ? `Presenças: ${holidayPresence.join(", ")}` : "Nenhuma presença marcada"}</small>{holidaySoloPeople.length > 0 && <small>Aulas solo: {holidaySoloPeople.join(", ")}</small>}</span></div>;
@@ -944,7 +944,8 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     scheduledDays.forEach(date => {
       const weekday = new Date(`${date}T12:00:00`).getDay();
       const schedule = schedules.find(item => item.person_id === person.id && item.weekday === weekday && scheduleAppliesOn(item, date));
-      const type = overrides.find(item => item.person_id === person.id && item.date === date)?.daily_type ?? schedule?.daily_type;
+      const configuredDailyType = schedules.find(item => item.person_id === person.id && scheduleAppliesOn(item, date))?.daily_type;
+      const type = isHolidayOn(date, operationExceptions) ? configuredDailyType ?? schedule?.daily_type ?? overrides.find(item => item.person_id === person.id && item.date === date)?.daily_type : overrides.find(item => item.person_id === person.id && item.date === date)?.daily_type ?? schedule?.daily_type;
       dailyTypes.push(type ?? "half");
       total += 1;
       if (type === "full") complete += 1;
