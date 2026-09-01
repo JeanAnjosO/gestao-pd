@@ -316,3 +316,35 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
   .student-import-heading { align-items:start;flex-direction:column; }
   .student-import-grid { grid-template-columns:1fr; }
 }
+.student-dashboard { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px; }
+.student-dashboard article { display:grid;gap:4px;min-height:128px;padding:17px;border:2px solid var(--line);border-radius:12px;background:var(--paper); }
+.student-dashboard article small { color:var(--muted);font-weight:700; }
+.student-dashboard article strong { font-size:2rem;line-height:1; }
+.student-dashboard article span { margin-top:auto;color:var(--muted);font-size:.76rem; }
+.student-dashboard .student-total { grid-column:span 2;min-height:150px;border-color:#d4b45f;background:linear-gradient(135deg,#fffaf0,#f3ead1); }
+.student-dashboard .student-total strong { font-size:3rem;color:var(--forest); }
+.student-dashboard .metric-light-green { border-color:#9ed6b3; }
+.student-dashboard .metric-alert { border-color:#df8a82;background:#fff9f8; }
+.student-dashboard .metric-alert strong { color:var(--red); }
+.student-dashboard .metric-blue { border-color:#9bc4e9; }
+.student-dashboard .metric-dark-green { border-color:#286346;background:#f5fbf7; }
+.file-picker { gap:5px; }
+.file-picker small { color:var(--muted);font-size:.72rem;font-weight:500; }
+.import-error { margin:0!important;padding:9px 11px;border-radius:8px;background:var(--red-bg);color:var(--red)!important;font-size:.82rem; }
+.wellhub-ranking>div { display:flex;align-items:center;justify-content:space-between;gap:12px; }
+.wellhub-ranking>div>span { padding:6px 9px;border-radius:999px;background:var(--mint);color:var(--green);font-size:.76rem;font-weight:700; }
+.wellhub-ranking ol { display:grid;gap:7px;margin:15px 0 0;padding:0;list-style:none;counter-reset:ranking; }
+.wellhub-ranking li { counter-increment:ranking;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:#f7f9f7; }
+.wellhub-ranking li::before { content:counter(ranking);display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--forest);color:white;font-size:.75rem;font-weight:800; }
+.wellhub-ranking li span { flex:1; }
+.wellhub-ranking li strong { color:var(--green);font-size:.85rem; }
+
+@media(max-width:760px){
+  .student-dashboard { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .student-dashboard .student-total { grid-column:1/-1; }
+}
+
+@media(max-width:480px){
+  .student-dashboard { grid-template-columns:1fr; }
+  .student-dashboard .student-total { grid-column:auto; }
+}

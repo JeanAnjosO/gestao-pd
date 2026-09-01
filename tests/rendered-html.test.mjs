@@ -83,6 +83,11 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /accept="\.xlsx,\.xls,\.csv"/);
   assert.match(page, /Wellhub/);
   assert.match(page, /CloudGym/);
+  assert.match(page, /MAX_STUDENT_IMPORT_BYTES/);
+  assert.match(page, /Número total de alunos/);
+  assert.match(page, /Frequentes Wellhub/);
+  assert.match(page, /Frequentes TotalPass/);
+  assert.match(page, /Pessoas com 12 ou mais check-ins/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
   assert.match(ui, /export function Table/);
 });

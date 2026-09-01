@@ -9,6 +9,7 @@ import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteR
 import { ADMIN_ACCESS_ROLE_ID, APP_RELEASE, ASSIGNMENT_TYPES, CALENDAR_MODES, CALENDAR_TEAM_RELEASE_AT, CAPABILITIES, CLASS_TYPES, FUNCTION_TYPES, MOBILE_SESSION_MS, menus, menuIcons, PERSON_TYPES, RECEPTION_PRIORITY_PERSON_IDS, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY, WEB_INACTIVITY_MS, functionTypeOptions, labels, personTypeOptions, week } from "./domain/constants";
 import { clearSessionMetadata, displayName, formatCurrency, isHolidayOn, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
 import { chooseCalendarPerson } from "./domain/calendar";
+import { calculateCloudgymReport, calculateWellhubReport, MAX_STUDENT_IMPORT_BYTES, parseWorkbookRows, type CloudgymStudentReport, type WellhubStudentReport } from "./domain/student-report";
 
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -436,6 +437,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const start = `${year}-${String(month + 1).padStart(2,"0")}-01`;
   const end = `${year}-${String(month + 1).padStart(2,"0")}-${String(new Date(year, month + 1, 0).getDate()).padStart(2,"0")}`;
   const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(viewMonth);
+  const totalStudents = (wellhubResult?.frequent ?? 0) + (cloudgymResult?.enrolled ?? 0) + (cloudgymResult?.frequentTotalPass ?? 0);
   const monthName = new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(viewMonth);
   const isManager = role === "gestor";
 
@@ -887,6 +889,9 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
   const [reportSection, setReportSection] = useState<"closing" | "students">("closing");
   const [wellhubFile, setWellhubFile] = useState<File | null>(null);
   const [cloudgymFile, setCloudgymFile] = useState<File | null>(null);
+  const [wellhubResult, setWellhubResult] = useState<WellhubStudentReport | null>(null);
+  const [cloudgymResult, setCloudgymResult] = useState<CloudgymStudentReport | null>(null);
+  const [studentImportErrors, setStudentImportErrors] = useState<{ wellhub?: string; cloudgym?: string }>({});
   const [viewMonth, setViewMonth] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
   const [absences, setAbsences] = useState<AbsenceRow[]>([]);
   const [overrides, setOverrides] = useState<DailyOverrideRow[]>([]);
@@ -899,6 +904,21 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
   const prefix = `${year}-${String(month + 1).padStart(2,"0")}`;
   const monthStart = `${prefix}-01`;
   const monthEnd = `${prefix}-${String(new Date(year, month + 1, 0).getDate()).padStart(2,"0")}`;
+  const importStudentFile = async (source: "wellhub" | "cloudgym", file?: File) => {
+    if (!file) return;
+    if (file.size > MAX_STUDENT_IMPORT_BYTES) {
+      setStudentImportErrors(current => ({ ...current, [source]: "O arquivo deve ter no máximo 1 MB." }));
+      return;
+    }
+    try {
+      const rows = await parseWorkbookRows(file);
+      if (source === "wellhub") { setWellhubFile(file); setWellhubResult(calculateWellhubReport(rows)); }
+      else { setCloudgymFile(file); setCloudgymResult(calculateCloudgymReport(rows)); }
+      setStudentImportErrors(current => ({ ...current, [source]: undefined }));
+    } catch {
+      setStudentImportErrors(current => ({ ...current, [source]: "Não foi possível ler esta planilha. Confira o formato do arquivo." }));
+    }
+  };
   useEffect(() => {
     if (!unitId) return;
     const loadReport = async () => {
@@ -996,11 +1016,20 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
       <div className="report-download-actions"><button type="button" className="primary" disabled={exportingReport} onClick={exportReportImage}>{exportingReport ? "Gerando imagem…" : "Baixar relatório"}</button></div>
       <div className="report-export-area" ref={reportRef}><div className="report-image-heading"><span>GESTÃO PD</span><div><h3>Relatório mensal</h3><strong>{monthLabel}</strong></div></div><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={3} blueColumns={[0,1,2]} headers={["Pessoa","Total de diárias","Aulas solo","Valor","Faltas","Função","Nível"]} rows={[...rows, ...externalRows]} /></div>
     </> : <section className="student-imports">
-      <div className="student-import-heading"><div><h3>Número de alunos</h3><p>Selecione as duas planilhas. O processamento será configurado na próxima etapa.</p></div><span>{Number(Boolean(wellhubFile)) + Number(Boolean(cloudgymFile))}/2 arquivos selecionados</span></div>
-      <div className="student-import-grid">
-        <article className={wellhubFile ? "import-card selected" : "import-card"}><div className="import-source"><span>W</span><div><strong>Wellhub</strong><small>Planilha de utilização do benefício</small></div></div><label className="file-picker"><input type="file" accept=".xlsx,.xls,.csv" onChange={event => setWellhubFile(event.target.files?.[0] ?? null)} /><span>{wellhubFile ? "Trocar planilha" : "Selecionar planilha"}</span></label>{wellhubFile ? <div className="selected-file"><div><strong>{wellhubFile.name}</strong><small>{Math.max(1, Math.round(wellhubFile.size / 1024))} KB</small></div><button type="button" onClick={() => setWellhubFile(null)}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
-        <article className={cloudgymFile ? "import-card selected" : "import-card"}><div className="import-source cloudgym"><span>C</span><div><strong>CloudGym</strong><small>Planilha da base de alunos</small></div></div><label className="file-picker"><input type="file" accept=".xlsx,.xls,.csv" onChange={event => setCloudgymFile(event.target.files?.[0] ?? null)} /><span>{cloudgymFile ? "Trocar planilha" : "Selecionar planilha"}</span></label>{cloudgymFile ? <div className="selected-file"><div><strong>{cloudgymFile.name}</strong><small>{Math.max(1, Math.round(cloudgymFile.size / 1024))} KB</small></div><button type="button" onClick={() => setCloudgymFile(null)}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
+      <div className="student-import-heading"><div><h3>Número de alunos</h3><p>Importe as bases para calcular os indicadores. Os arquivos são processados somente neste dispositivo.</p></div><span>{Number(Boolean(wellhubResult)) + Number(Boolean(cloudgymResult))}/2 planilhas processadas</span></div>
+      <div className="student-dashboard">
+        <article className="student-total"><small>Número total de alunos</small><strong>{wellhubResult || cloudgymResult ? totalStudents : "—"}</strong><span>Frequentes Wellhub + Matriculados + Frequentes TotalPass</span></article>
+        <article><small>Frequentes Wellhub</small><strong>{wellhubResult?.frequent ?? "—"}</strong><span>4 ou mais check-ins</span></article>
+        <article className="metric-light-green"><small>Check-ins &gt;= 12</small><strong>{wellhubResult?.twelveOrMore ?? "—"}</strong><span>Wellhub</span></article>
+        <article className="metric-alert"><small>Check-ins &lt; 4</small><strong>{wellhubResult?.belowFour ?? "—"}</strong><span>Alerta Wellhub</span></article>
+        <article className="metric-blue"><small>Matriculados</small><strong>{cloudgymResult?.enrolled ?? "—"}</strong><span>Exceto TotalPass e Gympass</span></article>
+        <article className="metric-dark-green"><small>Frequentes TotalPass</small><strong>{cloudgymResult?.frequentTotalPass ?? "—"}</strong><span>Valor bruto maior que R$ 90</span></article>
       </div>
+      <div className="student-import-grid">
+        <article className={wellhubFile ? "import-card selected" : "import-card"}><div className="import-source"><span>W</span><div><strong>Wellhub</strong><small>Nome na coluna C · check-ins na coluna E · desde a linha 11</small></div></div><label className="file-picker"><input key={wellhubFile?.name ?? "wellhub-empty"} type="file" accept=".xlsx,.xls,.csv" onChange={event => void importStudentFile("wellhub", event.target.files?.[0])} /><span>{wellhubFile ? "Trocar planilha" : "Selecionar planilha"}</span><small>Máximo de 1 MB</small></label>{studentImportErrors.wellhub && <p className="import-error">{studentImportErrors.wellhub}</p>}{wellhubFile ? <div className="selected-file"><div><strong>{wellhubFile.name}</strong><small>{Math.max(1, Math.round(wellhubFile.size / 1024))} KB · processada</small></div><button type="button" onClick={() => { setWellhubFile(null); setWellhubResult(null); setStudentImportErrors(current => ({ ...current, wellhub: undefined })); }}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
+        <article className={cloudgymFile ? "import-card selected" : "import-card"}><div className="import-source cloudgym"><span>C</span><div><strong>CloudGym</strong><small>Nome na coluna A · pagamento na F · valor bruto na H · desde a linha 3</small></div></div><label className="file-picker"><input key={cloudgymFile?.name ?? "cloudgym-empty"} type="file" accept=".xlsx,.xls,.csv" onChange={event => void importStudentFile("cloudgym", event.target.files?.[0])} /><span>{cloudgymFile ? "Trocar planilha" : "Selecionar planilha"}</span><small>Máximo de 1 MB</small></label>{studentImportErrors.cloudgym && <p className="import-error">{studentImportErrors.cloudgym}</p>}{cloudgymFile ? <div className="selected-file"><div><strong>{cloudgymFile.name}</strong><small>{Math.max(1, Math.round(cloudgymFile.size / 1024))} KB · processada</small></div><button type="button" onClick={() => { setCloudgymFile(null); setCloudgymResult(null); setStudentImportErrors(current => ({ ...current, cloudgym: undefined })); }}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
+      </div>
+      {wellhubResult && <section className="panel wellhub-ranking"><div><h3>Pessoas com 12 ou mais check-ins</h3><span>{wellhubResult.twelveOrMorePeople.length} pessoas</span></div>{wellhubResult.twelveOrMorePeople.length ? <ol>{wellhubResult.twelveOrMorePeople.map(person => <li key={`${person.name}-${person.checkins}`}><span>{person.name}</span><strong>{person.checkins} check-ins</strong></li>)}</ol> : <p>Nenhuma pessoa atingiu 12 check-ins.</p>}</section>}
     </section>}
   </>;
 }
