@@ -78,6 +78,11 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /Modo somente leitura · nenhuma alteração será salva/);
   assert.match(page, /people\.filter\(person => person\.active && !isPersonType\(person, "manager"\)\)/);
   assert.match(page, /if \(readOnly\) return/);
+  assert.match(page, /setReportSection\("closing"\).*Fechamento/);
+  assert.match(page, /setReportSection\("students"\).*Número de alunos/);
+  assert.match(page, /accept="\.xlsx,\.xls,\.csv"/);
+  assert.match(page, /Wellhub/);
+  assert.match(page, /CloudGym/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
   assert.match(ui, /export function Table/);
 });

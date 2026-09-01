@@ -884,6 +884,9 @@ function Substitutions({ profile, unitId, openingDays, operationExceptions, peop
 function OperationTable({ headers, rows }: { headers: string[]; rows: (string | React.ReactNode)[][] }) { return <div className="table-wrap operation-table"><table><thead><tr>{headers.map(header => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.length ? rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} data-label={headers[cellIndex]}>{cell}</td>)}</tr>) : <tr><td colSpan={headers.length}>Nenhum registro cadastrado.</td></tr>}</tbody></table></div>; }
 function Reports({ unitId, openingDays, people, schedules, operationExceptions, soloRows, substitutions }: { unitId: number | null; openingDays: boolean[]; people: PersonRow[]; schedules: ScheduleRow[]; operationExceptions: OperationExceptionRow[]; soloRows: SoloRow[]; substitutions: SubstitutionRow[] }) {
   const now = new Date();
+  const [reportSection, setReportSection] = useState<"closing" | "students">("closing");
+  const [wellhubFile, setWellhubFile] = useState<File | null>(null);
+  const [cloudgymFile, setCloudgymFile] = useState<File | null>(null);
   const [viewMonth, setViewMonth] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
   const [absences, setAbsences] = useState<AbsenceRow[]>([]);
   const [overrides, setOverrides] = useState<DailyOverrideRow[]>([]);
@@ -983,7 +986,23 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     return [name, full ? `${records.length}, ${full} comp` : String(records.length), "—", paymentCell(dailyAmount, 0, half, full, 0, 0), "0", "Substituto externo", level ? `Nível ${level}` : "—"];
   });
   const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(viewMonth);
-  return <><Title title="Relatório mensal" text="Resumo objetivo de professores e recepção. Gestores não são contabilizados." /><div className="report-download-actions"><button type="button" className="primary" disabled={exportingReport} onClick={exportReportImage}>{exportingReport ? "Gerando imagem…" : "Baixar relatório"}</button></div><div className="report-export-area" ref={reportRef}><div className="report-image-heading"><span>GESTÃO PD</span><div><h3>Relatório mensal</h3><strong>{monthLabel}</strong></div></div><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={3} blueColumns={[0,1,2]} headers={["Pessoa","Total de diárias","Aulas solo","Valor","Faltas","Função","Nível"]} rows={[...rows, ...externalRows]} /></div></>;
+  return <>
+    <Title title="Relatórios" text="Acesse o fechamento mensal ou importe as bases de número de alunos." />
+    <nav className="report-submenu" aria-label="Seções do relatório">
+      <button type="button" className={reportSection === "closing" ? "active" : ""} onClick={() => setReportSection("closing")}>Fechamento</button>
+      <button type="button" className={reportSection === "students" ? "active" : ""} onClick={() => setReportSection("students")}>Número de alunos</button>
+    </nav>
+    {reportSection === "closing" ? <>
+      <div className="report-download-actions"><button type="button" className="primary" disabled={exportingReport} onClick={exportReportImage}>{exportingReport ? "Gerando imagem…" : "Baixar relatório"}</button></div>
+      <div className="report-export-area" ref={reportRef}><div className="report-image-heading"><span>GESTÃO PD</span><div><h3>Relatório mensal</h3><strong>{monthLabel}</strong></div></div><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={3} blueColumns={[0,1,2]} headers={["Pessoa","Total de diárias","Aulas solo","Valor","Faltas","Função","Nível"]} rows={[...rows, ...externalRows]} /></div>
+    </> : <section className="student-imports">
+      <div className="student-import-heading"><div><h3>Número de alunos</h3><p>Selecione as duas planilhas. O processamento será configurado na próxima etapa.</p></div><span>{Number(Boolean(wellhubFile)) + Number(Boolean(cloudgymFile))}/2 arquivos selecionados</span></div>
+      <div className="student-import-grid">
+        <article className={wellhubFile ? "import-card selected" : "import-card"}><div className="import-source"><span>W</span><div><strong>Wellhub</strong><small>Planilha de utilização do benefício</small></div></div><label className="file-picker"><input type="file" accept=".xlsx,.xls,.csv" onChange={event => setWellhubFile(event.target.files?.[0] ?? null)} /><span>{wellhubFile ? "Trocar planilha" : "Selecionar planilha"}</span></label>{wellhubFile ? <div className="selected-file"><div><strong>{wellhubFile.name}</strong><small>{Math.max(1, Math.round(wellhubFile.size / 1024))} KB</small></div><button type="button" onClick={() => setWellhubFile(null)}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
+        <article className={cloudgymFile ? "import-card selected" : "import-card"}><div className="import-source cloudgym"><span>C</span><div><strong>CloudGym</strong><small>Planilha da base de alunos</small></div></div><label className="file-picker"><input type="file" accept=".xlsx,.xls,.csv" onChange={event => setCloudgymFile(event.target.files?.[0] ?? null)} /><span>{cloudgymFile ? "Trocar planilha" : "Selecionar planilha"}</span></label>{cloudgymFile ? <div className="selected-file"><div><strong>{cloudgymFile.name}</strong><small>{Math.max(1, Math.round(cloudgymFile.size / 1024))} KB</small></div><button type="button" onClick={() => setCloudgymFile(null)}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
+      </div>
+    </section>}
+  </>;
 }
 
 function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays, setOpeningDays, operationExceptions, setOperationExceptions, people, setPeople, schedules, setSchedules, soloRows }: { profile: Profile; unitId: number | null; units: UnitRow[]; setUnits: (v: UnitRow[]) => void; selectUnit: (v: number) => void; openingDays: boolean[]; setOpeningDays: (v: boolean[]) => void; operationExceptions: OperationExceptionRow[]; setOperationExceptions: (v: OperationExceptionRow[]) => void; people: PersonRow[]; setPeople: (v: PersonRow[]) => void; schedules: ScheduleRow[]; setSchedules: (v: ScheduleRow[]) => void; soloRows: SoloRow[] }) {
