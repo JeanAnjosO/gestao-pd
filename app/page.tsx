@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { supabase } from "./supabase";
 import { InstallAppPrompt } from "./components/InstallAppPrompt";
@@ -442,10 +442,23 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const isManager = role === "gestor";
 
   useEffect(() => {
-    const updateBoardZoom = () => boardRef.current?.style.setProperty("zoom", String(window.innerWidth <= 760 ? Math.min(1, Math.max(0.32, (window.innerWidth - 24) / 900)) : 1));
+    if (isManager) return;
+    const current = new Date();
+    setViewMonth(new Date(current.getFullYear(), current.getMonth(), 1));
+    setTab("board");
+  }, [isManager]);
+
+  useLayoutEffect(() => {
+    const updateBoardZoom = () => {
+      if (!boardRef.current?.parentElement) return;
+      const availableWidth = boardRef.current.parentElement.clientWidth;
+      boardRef.current.style.setProperty("zoom", String(window.innerWidth <= 760 ? Math.min(1, availableWidth / 900) : 1));
+    };
     updateBoardZoom();
+    const observer = new ResizeObserver(updateBoardZoom);
+    if (boardRef.current?.parentElement) observer.observe(boardRef.current.parentElement);
     window.addEventListener("resize", updateBoardZoom);
-    return () => window.removeEventListener("resize", updateBoardZoom);
+    return () => { observer.disconnect(); window.removeEventListener("resize", updateBoardZoom); };
   }, [tab]);
 
   useEffect(() => {
@@ -635,13 +648,13 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     const options = currentPerson && !candidates.some(person => person.id === currentPerson.id) ? [currentPerson, ...candidates] : candidates;
     return <select aria-label={`${type === 1 ? "Roda" : type === 2 ? "Som" : "Portaria"} em ${date}`} value={current?.person_id ?? ""} onChange={event => changeAssignment(date, type, classId, Number(event.target.value))}><option value="">Pendente</option>{options.map(person => <option key={person.id} value={person.id}>{displayName(person)}</option>)}</select>;
   };
-  if (!isManager && period?.status !== "published") return <><Title title="Calendário" text="Consulte as funções da equipe por dia de aula." /><div className="panel calendar-empty"><strong>Calendário ainda não publicado</strong><p>A gestão está preparando a escala de {monthLabel}.</p><div className="calendar-month-nav"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><span>{monthLabel}</span><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div></div></>;
+  if (!isManager && period?.status !== "published") return <><Title title="Calendário" text="Consulte as funções da equipe por dia de aula." /><div className="panel calendar-empty"><strong>Calendário ainda não publicado</strong><p>A gestão está preparando a escala de {monthLabel}.</p><div className="calendar-current-month"><span>{monthLabel}</span></div></div></>;
 
   return <>
     <Title title="Calendário" text={unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples de Roda, Som e Portaria." : "Escala por cores: Branca, Azul e Preta."} />
     <div className="calendar-toolbar panel">
-      <div className="calendar-month-nav"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><strong>{monthLabel}</strong><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div>
-      <div className="calendar-tabs"><button className={tab === "planning" ? "active" : ""} onClick={() => setTab("planning")}>{isManager ? "Planejamento" : "Lista"}</button><button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>Quadro para compartilhar</button></div>
+      {isManager ? <div className="calendar-month-nav"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><strong>{monthLabel}</strong><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div> : <div className="calendar-current-month"><strong>{monthLabel}</strong></div>}
+      <div className={`calendar-tabs ${isManager ? "" : "team-calendar-tab"}`}>{isManager && <button className={tab === "planning" ? "active" : ""} onClick={() => setTab("planning")}>Planejamento</button>}<button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>{isManager ? "Quadro para compartilhar" : "Escala"}</button></div>
       <span className={`calendar-status ${period?.status ?? "draft"}`}>{period?.status === "published" ? "Publicado" : "Rascunho"}</span>
     </div>
     {message && <p className="operation-message calendar-message">{message}</p>}
@@ -649,7 +662,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
       {isManager && <div className="calendar-actions panel"><div><strong>{missingCount || conflictCount ? `${missingCount} pendentes · ${conflictCount} afetadas por falta` : "Escala completa"}</strong><small>Ao refazer, dias anteriores e observações são preservados.</small></div><button className="primary" disabled={busy} onClick={assignments.length ? rebuildCalendar : () => generateCalendar()}>{busy ? "Gerando…" : assignments.length ? "Refazer calendário" : "Montar calendário"}</button><button className="delete-action" disabled={busy || (!assignments.length && !notes.length)} onClick={clearCalendar}>Limpar calendário</button><button disabled={!period || busy} onClick={publishCalendar}>Publicar escala</button></div>}
       <div className="calendar-days">{days.map(date => { const holiday = isHolidayOn(date, operationExceptions); const hasConflict = !holiday && assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)); return <section className={`calendar-day-card ${holiday ? "holiday-card" : requiredSlots.some(slot => slot.date === date && !assignmentFor(date, slot.type, slot.classId)) ? "has-pending" : ""} ${hasConflict ? "has-conflict" : ""}`} key={date}><header><div><strong>{formatDay(date)}</strong><small>{holiday ? "FERIADO" : hasConflict ? "Atenção: responsável com falta" : unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples" : "3 turmas"}</small></div>{holiday ? <input value="FERIADO" aria-label={`Observação de ${date}`} disabled readOnly /> : isManager ? <input maxLength={240} defaultValue={notes.find(item => item.date === date)?.note ?? ""} placeholder="Observação do dia" onBlur={event => saveNote(date, event.target.value)} /> : <span>{notes.find(item => item.date === date)?.note || "Sem observação"}</span>}</header><div className="calendar-day-rows">{classSlots.map(classType => <div className={`calendar-duty-row class-${classType.code}`} key={classType.id ?? "simple"}>{classType.id && <span className="class-marker">{classType.label}</span>}<label><small>Roda</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 1, classType.id) : <strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong>}</label><label><small>Som</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 2, classType.id) : <strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong>}</label></div>)}</div><div className="calendar-reception"><small>Portaria</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 3, null) : <strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong>}</div></section>; })}</div>
     </div> : <div className="calendar-board-area">
-      <div className="board-controls panel"><label>Período<select value={range} onChange={event => setRange(event.target.value as typeof range)}><option value="first">1º quadro · até a 2ª sexta</option><option value="second">2º quadro · restante do mês</option><option value="month">Mês completo</option></select></label><button onClick={() => exportImage(false)} disabled={busy}>Baixar imagem</button><button className="primary" onClick={() => exportImage(true)} disabled={busy}>Compartilhar</button><button onClick={() => window.print()}>Imprimir / PDF</button></div>
+      <div className="board-controls panel"><label>Período<select value={range} onChange={event => setRange(event.target.value as typeof range)}><option value="first">1º quadro · até a 2ª sexta</option><option value="second">2º quadro · restante do mês</option><option value="month">Mês completo</option></select></label>{isManager && <><button onClick={() => exportImage(false)} disabled={busy}>Baixar imagem</button><button className="primary" onClick={() => exportImage(true)} disabled={busy}>Compartilhar</button><button onClick={() => window.print()}>Imprimir / PDF</button></>}</div>
       <div className="calendar-board-scroll"><div className={`calendar-share-board mode-${unit.calendar_mode_type_id === 1 ? "simple" : "colors"}`} ref={boardRef}><div className="share-board-heading"><div className="share-board-brand"><div><span>GESTÃO PD</span><h3>{unit.name}</h3></div><strong>Calendário {monthName}</strong></div><div><small>{range === "month" ? "Mês completo" : range === "first" ? "1º quadro · até a 2ª sexta" : "2º quadro · restante do mês"}</small></div></div><table><thead><tr><th>Data</th><th>Roda</th><th>Som</th><th>Portaria</th><th>Observação</th></tr></thead><tbody>{visibleDays.flatMap((date, dayIndex) => { const holiday = isHolidayOn(date, operationExceptions); const rows = classSlots.map((classType, index) => <tr className={holiday ? "board-holiday-row" : `class-${classType.code}`} key={`${date}-${classType.id ?? "simple"}`}>{index === 0 && <td className="board-date-cell board-merged-cell" rowSpan={classSlots.length}>{formatDay(date)}</td>}<td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong></td><td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong></td>{index === 0 && <td className="board-reception-cell board-merged-cell" rowSpan={classSlots.length}><strong>{holiday ? "" : personName(assignmentFor(date, 3, null)?.person_id)}</strong></td>}{index === 0 && <td className="board-note-cell board-merged-cell" rowSpan={classSlots.length}>{holiday ? "FERIADO" : notes.find(item => item.date === date)?.note ?? ""}</td>}</tr>); const showWeek = dayIndex === 0 || calendarWeek(visibleDays[dayIndex - 1]) !== calendarWeek(date); return [<tr className="board-week-row" key={`week-${date}`}><td colSpan={5}>Semana {calendarWeek(date)}</td></tr>, ...rows].filter((_, index) => showWeek || index > 0); })}</tbody></table><div className="share-board-footer"><span>Roda · Som · Portaria</span><small>Atualizado em {new Date().toLocaleDateString("pt-BR")}</small></div></div></div>
     </div>}
   </>;

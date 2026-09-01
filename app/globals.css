@@ -371,3 +371,10 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
   .student-dashboard { grid-template-columns:1fr; }
   .student-dashboard .student-total { grid-column:auto; }
 }
+
+.calendar-current-month{display:flex;align-items:center;justify-content:center;text-transform:capitalize}
+.calendar-tabs.team-calendar-tab{display:flex;justify-content:center}
+@media(max-width:760px){
+  .calendar-tabs.team-calendar-tab{display:flex;grid-template-columns:none}
+  .calendar-tabs.team-calendar-tab button{width:100%}
+}

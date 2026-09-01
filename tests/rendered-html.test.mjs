@@ -55,6 +55,10 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(calendar, /repeatedThisWeek/);
   assert.match(calendar, /lowestRoleCount/);
   assert.match(page, /chooseCalendarPerson\(/);
+  assert.match(page, /useLayoutEffect/);
+  assert.match(page, /availableWidth \/ 900/);
+  assert.match(page, /isManager \? "Quadro para compartilhar" : "Escala"/);
+  assert.match(page, /isManager && <><button onClick=\{\(\) => exportImage/);
   assert.match(page, /Mês atual/);
   assert.match(page, /Próximo mês/);
   assert.match(page, /managerMonthOffset === 0 && <TodayOperations/);
