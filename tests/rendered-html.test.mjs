@@ -88,6 +88,11 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /Frequentes Wellhub/);
   assert.match(page, /Frequentes TotalPass/);
   assert.match(page, /Pessoas com 12 ou mais check-ins/);
+  assert.match(page, /const totalStudents = \(wellhubResult\?\.frequent/);
+  assert.equal((page.match(/const totalStudents =/g) ?? []).length, 1);
+  assert.match(page, /student_count_closings/);
+  assert.match(page, /type="month" value=\{studentCompetence\}/);
+  assert.match(page, /Salvar fechamento/);
   assert.match(installPrompt, /if \(!isMobileSession\(\)\) return/);
   assert.match(ui, /export function Table/);
 });

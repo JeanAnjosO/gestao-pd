@@ -1,5 +1,3 @@
-import { read, utils } from "xlsx";
-
 export const MAX_STUDENT_IMPORT_BYTES = 1024 * 1024;
 
 export type WellhubStudentReport = {
@@ -31,6 +29,7 @@ const numericValue = (value: Cell) => {
 
 export const parseWorkbookRows = async (file: File): Promise<SheetRows> => {
   if (file.size > MAX_STUDENT_IMPORT_BYTES) throw new Error("O arquivo deve ter no máximo 1 MB.");
+  const { read, utils } = await import("xlsx");
   const workbook = read(await file.arrayBuffer(), { type: "array", cellDates: true });
   const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!firstSheet) throw new Error("A planilha não possui uma aba válida.");

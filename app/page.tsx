@@ -268,7 +268,7 @@ export default function Home() {
           {screen === "faltas" && <Absences role={viewRole} profile={viewProfile} unitId={unitId} minimumTeachers={selectedUnit?.minimum_teachers ?? 4} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} readOnly={simulationReadOnly} />}
           {screen === "solo" && <Solo role={viewRole} profile={viewProfile} unitId={unitId} classes={classes} people={people} schedules={schedules} operationExceptions={operationExceptions} substitutions={substitutionRows} rows={soloRows} setRows={setSoloRows} readOnly={simulationReadOnly} />}
           {screen === "substituicoes" && <Substitutions profile={profile} unitId={unitId} openingDays={openingDays} operationExceptions={operationExceptions} people={people} rows={substitutionRows} setRows={setSubstitutionRows} />}
-          {screen === "relatorios" && <Reports unitId={unitId} openingDays={openingDays} people={people} schedules={schedules} operationExceptions={operationExceptions} soloRows={soloRows} substitutions={substitutionRows} />}
+          {screen === "relatorios" && <Reports profile={profile} unitId={unitId} openingDays={openingDays} people={people} schedules={schedules} operationExceptions={operationExceptions} soloRows={soloRows} substitutions={substitutionRows} />}
           {screen === "parametros" && <Parameters profile={profile} unitId={unitId} units={units} setUnits={setUnits} selectUnit={setUnitId} openingDays={openingDays} setOpeningDays={setOpeningDays} operationExceptions={operationExceptions} setOperationExceptions={setOperationExceptions} people={people} setPeople={setPeople} schedules={schedules} setSchedules={setSchedules} soloRows={soloRows} />}
         </div>
       </section>
@@ -437,7 +437,6 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const start = `${year}-${String(month + 1).padStart(2,"0")}-01`;
   const end = `${year}-${String(month + 1).padStart(2,"0")}-${String(new Date(year, month + 1, 0).getDate()).padStart(2,"0")}`;
   const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(viewMonth);
-  const totalStudents = (wellhubResult?.frequent ?? 0) + (cloudgymResult?.enrolled ?? 0) + (cloudgymResult?.frequentTotalPass ?? 0);
   const monthName = new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(viewMonth);
   const isManager = role === "gestor";
 
@@ -884,14 +883,35 @@ function Substitutions({ profile, unitId, openingDays, operationExceptions, peop
 }
 
 function OperationTable({ headers, rows }: { headers: string[]; rows: (string | React.ReactNode)[][] }) { return <div className="table-wrap operation-table"><table><thead><tr>{headers.map(header => <th key={header}>{header}</th>)}</tr></thead><tbody>{rows.length ? rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex} data-label={headers[cellIndex]}>{cell}</td>)}</tr>) : <tr><td colSpan={headers.length}>Nenhum registro cadastrado.</td></tr>}</tbody></table></div>; }
-function Reports({ unitId, openingDays, people, schedules, operationExceptions, soloRows, substitutions }: { unitId: number | null; openingDays: boolean[]; people: PersonRow[]; schedules: ScheduleRow[]; operationExceptions: OperationExceptionRow[]; soloRows: SoloRow[]; substitutions: SubstitutionRow[] }) {
+type StudentClosingRow = {
+  id: number;
+  year: number;
+  month: number;
+  wellhub_frequent: number;
+  wellhub_twelve_or_more: number;
+  wellhub_below_four: number;
+  wellhub_twelve_or_more_people: { name: string; checkins: number }[];
+  cloudgym_enrolled: number;
+  cloudgym_frequent_totalpass: number;
+  wellhub_file_name: string | null;
+  cloudgym_file_name: string | null;
+  saved_at: string;
+};
+type ImportedFile = { name: string; size: number };
+
+function Reports({ profile, unitId, openingDays, people, schedules, operationExceptions, soloRows, substitutions }: { profile: Profile; unitId: number | null; openingDays: boolean[]; people: PersonRow[]; schedules: ScheduleRow[]; operationExceptions: OperationExceptionRow[]; soloRows: SoloRow[]; substitutions: SubstitutionRow[] }) {
   const now = new Date();
+  const previousMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const [reportSection, setReportSection] = useState<"closing" | "students">("closing");
-  const [wellhubFile, setWellhubFile] = useState<File | null>(null);
-  const [cloudgymFile, setCloudgymFile] = useState<File | null>(null);
+  const [wellhubFile, setWellhubFile] = useState<ImportedFile | null>(null);
+  const [cloudgymFile, setCloudgymFile] = useState<ImportedFile | null>(null);
   const [wellhubResult, setWellhubResult] = useState<WellhubStudentReport | null>(null);
   const [cloudgymResult, setCloudgymResult] = useState<CloudgymStudentReport | null>(null);
   const [studentImportErrors, setStudentImportErrors] = useState<{ wellhub?: string; cloudgym?: string }>({});
+  const [studentCompetence, setStudentCompetence] = useState(`${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, "0")}`);
+  const [savedClosing, setSavedClosing] = useState<StudentClosingRow | null>(null);
+  const [closingBusy, setClosingBusy] = useState(false);
+  const [closingMessage, setClosingMessage] = useState("");
   const [viewMonth, setViewMonth] = useState(new Date(now.getFullYear(), now.getMonth(), 1));
   const [absences, setAbsences] = useState<AbsenceRow[]>([]);
   const [overrides, setOverrides] = useState<DailyOverrideRow[]>([]);
@@ -912,12 +932,52 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     }
     try {
       const rows = await parseWorkbookRows(file);
-      if (source === "wellhub") { setWellhubFile(file); setWellhubResult(calculateWellhubReport(rows)); }
-      else { setCloudgymFile(file); setCloudgymResult(calculateCloudgymReport(rows)); }
+      const fileInfo = { name: file.name, size: file.size };
+      if (source === "wellhub") { setWellhubFile(fileInfo); setWellhubResult(calculateWellhubReport(rows)); }
+      else { setCloudgymFile(fileInfo); setCloudgymResult(calculateCloudgymReport(rows)); }
+      setSavedClosing(null);
+      setClosingMessage("Resultados calculados. Salve o fechamento para manter este mês no histórico.");
       setStudentImportErrors(current => ({ ...current, [source]: undefined }));
     } catch {
       setStudentImportErrors(current => ({ ...current, [source]: "Não foi possível ler esta planilha. Confira o formato do arquivo." }));
     }
+  };
+  useEffect(() => {
+    if (!unitId || reportSection !== "students") return;
+    let cancelled = false;
+    const [closingYear, closingMonth] = studentCompetence.split("-").map(Number);
+    setClosingBusy(true);
+    setClosingMessage("");
+    void supabase.from("student_count_closings").select("id,year,month,wellhub_frequent,wellhub_twelve_or_more,wellhub_below_four,wellhub_twelve_or_more_people,cloudgym_enrolled,cloudgym_frequent_totalpass,wellhub_file_name,cloudgym_file_name,saved_at").eq("unit_id", unitId).eq("year", closingYear).eq("month", closingMonth).maybeSingle().then(({ data, error }) => {
+      if (cancelled) return;
+      if (error) { setClosingMessage("Não foi possível carregar o histórico desta competência."); setClosingBusy(false); return; }
+      const closing = data as StudentClosingRow | null;
+      setSavedClosing(closing);
+      setWellhubResult(closing ? { frequent: closing.wellhub_frequent, twelveOrMore: closing.wellhub_twelve_or_more, belowFour: closing.wellhub_below_four, twelveOrMorePeople: closing.wellhub_twelve_or_more_people ?? [] } : null);
+      setCloudgymResult(closing ? { enrolled: closing.cloudgym_enrolled, frequentTotalPass: closing.cloudgym_frequent_totalpass } : null);
+      setWellhubFile(closing?.wellhub_file_name ? { name: closing.wellhub_file_name, size: 0 } : null);
+      setCloudgymFile(closing?.cloudgym_file_name ? { name: closing.cloudgym_file_name, size: 0 } : null);
+      setClosingMessage(closing ? "Fechamento salvo para esta competência." : "Ainda não há fechamento salvo para esta competência.");
+      setClosingBusy(false);
+    });
+    return () => { cancelled = true; };
+  }, [unitId, reportSection, studentCompetence]);
+  const saveStudentClosing = async () => {
+    if (!unitId || !wellhubResult || !cloudgymResult) return;
+    const [closingYear, closingMonth] = studentCompetence.split("-").map(Number);
+    setClosingBusy(true);
+    const payload = {
+      unit_id: unitId, year: closingYear, month: closingMonth,
+      wellhub_frequent: wellhubResult.frequent, wellhub_twelve_or_more: wellhubResult.twelveOrMore,
+      wellhub_below_four: wellhubResult.belowFour, wellhub_twelve_or_more_people: wellhubResult.twelveOrMorePeople,
+      cloudgym_enrolled: cloudgymResult.enrolled, cloudgym_frequent_totalpass: cloudgymResult.frequentTotalPass,
+      wellhub_file_name: wellhubFile?.name ?? null, cloudgym_file_name: cloudgymFile?.name ?? null,
+      saved_by: profile.id, saved_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from("student_count_closings").upsert(payload, { onConflict: "unit_id,year,month" }).select("id,year,month,wellhub_frequent,wellhub_twelve_or_more,wellhub_below_four,wellhub_twelve_or_more_people,cloudgym_enrolled,cloudgym_frequent_totalpass,wellhub_file_name,cloudgym_file_name,saved_at").single();
+    if (error) setClosingMessage("Não foi possível salvar o fechamento. Tente novamente.");
+    else { setSavedClosing(data as StudentClosingRow); setClosingMessage("Fechamento salvo com sucesso."); }
+    setClosingBusy(false);
   };
   useEffect(() => {
     if (!unitId) return;
@@ -1006,6 +1066,8 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
     return [name, full ? `${records.length}, ${full} comp` : String(records.length), "—", paymentCell(dailyAmount, 0, half, full, 0, 0), "0", "Substituto externo", level ? `Nível ${level}` : "—"];
   });
   const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(viewMonth);
+  const totalStudents = (wellhubResult?.frequent ?? 0) + (cloudgymResult?.enrolled ?? 0) + (cloudgymResult?.frequentTotalPass ?? 0);
+  const studentCompetenceLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(`${studentCompetence}-01T12:00:00`));
   return <>
     <Title title="Relatórios" text="Acesse o fechamento mensal ou importe as bases de número de alunos." />
     <nav className="report-submenu" aria-label="Seções do relatório">
@@ -1016,7 +1078,8 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
       <div className="report-download-actions"><button type="button" className="primary" disabled={exportingReport} onClick={exportReportImage}>{exportingReport ? "Gerando imagem…" : "Baixar relatório"}</button></div>
       <div className="report-export-area" ref={reportRef}><div className="report-image-heading"><span>GESTÃO PD</span><div><h3>Relatório mensal</h3><strong>{monthLabel}</strong></div></div><div className="panel report-month-bar"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><div><strong>{monthLabel}</strong><small className={periodStatus === "closed" ? "closed" : "open"}>{periodStatus === "closed" ? "Competência fechada" : "Competência aberta"}</small></div><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div><Table sortable highlightColumn={3} blueColumns={[0,1,2]} headers={["Pessoa","Total de diárias","Aulas solo","Valor","Faltas","Função","Nível"]} rows={[...rows, ...externalRows]} /></div>
     </> : <section className="student-imports">
-      <div className="student-import-heading"><div><h3>Número de alunos</h3><p>Importe as bases para calcular os indicadores. Os arquivos são processados somente neste dispositivo.</p></div><span>{Number(Boolean(wellhubResult)) + Number(Boolean(cloudgymResult))}/2 planilhas processadas</span></div>
+      <div className="student-import-heading"><div><h3>Número de alunos</h3><p>Importe as bases do mês anterior, confira os indicadores e salve o fechamento no histórico.</p></div><span>{savedClosing ? "Fechamento salvo" : `${Number(Boolean(wellhubResult)) + Number(Boolean(cloudgymResult))}/2 planilhas processadas`}</span></div>
+      <div className="panel student-history-bar"><label>Competência<input type="month" value={studentCompetence} onChange={event => { if (event.target.value) setStudentCompetence(event.target.value); }} /></label><div><strong>{studentCompetenceLabel}</strong><small>{closingBusy ? "Carregando…" : closingMessage}</small></div><button type="button" className="primary" disabled={closingBusy || !wellhubResult || !cloudgymResult} onClick={saveStudentClosing}>{closingBusy ? "Aguarde…" : savedClosing ? "Atualizar fechamento" : "Salvar fechamento"}</button></div>
       <div className="student-dashboard">
         <article className="student-total"><small>Número total de alunos</small><strong>{wellhubResult || cloudgymResult ? totalStudents : "—"}</strong><span>Frequentes Wellhub + Matriculados + Frequentes TotalPass</span></article>
         <article><small>Frequentes Wellhub</small><strong>{wellhubResult?.frequent ?? "—"}</strong><span>4 ou mais check-ins</span></article>
@@ -1026,8 +1089,8 @@ function Reports({ unitId, openingDays, people, schedules, operationExceptions, 
         <article className="metric-dark-green"><small>Frequentes TotalPass</small><strong>{cloudgymResult?.frequentTotalPass ?? "—"}</strong><span>Valor bruto maior que R$ 90</span></article>
       </div>
       <div className="student-import-grid">
-        <article className={wellhubFile ? "import-card selected" : "import-card"}><div className="import-source"><span>W</span><div><strong>Wellhub</strong><small>Nome na coluna C · check-ins na coluna E · desde a linha 11</small></div></div><label className="file-picker"><input key={wellhubFile?.name ?? "wellhub-empty"} type="file" accept=".xlsx,.xls,.csv" onChange={event => void importStudentFile("wellhub", event.target.files?.[0])} /><span>{wellhubFile ? "Trocar planilha" : "Selecionar planilha"}</span><small>Máximo de 1 MB</small></label>{studentImportErrors.wellhub && <p className="import-error">{studentImportErrors.wellhub}</p>}{wellhubFile ? <div className="selected-file"><div><strong>{wellhubFile.name}</strong><small>{Math.max(1, Math.round(wellhubFile.size / 1024))} KB · processada</small></div><button type="button" onClick={() => { setWellhubFile(null); setWellhubResult(null); setStudentImportErrors(current => ({ ...current, wellhub: undefined })); }}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
-        <article className={cloudgymFile ? "import-card selected" : "import-card"}><div className="import-source cloudgym"><span>C</span><div><strong>CloudGym</strong><small>Nome na coluna A · pagamento na F · valor bruto na H · desde a linha 3</small></div></div><label className="file-picker"><input key={cloudgymFile?.name ?? "cloudgym-empty"} type="file" accept=".xlsx,.xls,.csv" onChange={event => void importStudentFile("cloudgym", event.target.files?.[0])} /><span>{cloudgymFile ? "Trocar planilha" : "Selecionar planilha"}</span><small>Máximo de 1 MB</small></label>{studentImportErrors.cloudgym && <p className="import-error">{studentImportErrors.cloudgym}</p>}{cloudgymFile ? <div className="selected-file"><div><strong>{cloudgymFile.name}</strong><small>{Math.max(1, Math.round(cloudgymFile.size / 1024))} KB · processada</small></div><button type="button" onClick={() => { setCloudgymFile(null); setCloudgymResult(null); setStudentImportErrors(current => ({ ...current, cloudgym: undefined })); }}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
+        <article className={wellhubFile ? "import-card selected" : "import-card"}><div className="import-source"><span>W</span><div><strong>Wellhub</strong><small>Nome na coluna C · check-ins na coluna E · desde a linha 11</small></div></div><label className="file-picker"><input key={wellhubFile?.name ?? "wellhub-empty"} type="file" accept=".xlsx,.xls,.csv" onChange={event => void importStudentFile("wellhub", event.target.files?.[0])} /><span>{wellhubFile ? "Trocar planilha" : "Selecionar planilha"}</span><small>Máximo de 1 MB</small></label>{studentImportErrors.wellhub && <p className="import-error">{studentImportErrors.wellhub}</p>}{wellhubFile ? <div className="selected-file"><div><strong>{wellhubFile.name}</strong><small>{wellhubFile.size ? `${Math.max(1, Math.round(wellhubFile.size / 1024))} KB · processada` : "Salva no histórico"}</small></div><button type="button" onClick={() => { setWellhubFile(null); setWellhubResult(null); setSavedClosing(null); setStudentImportErrors(current => ({ ...current, wellhub: undefined })); }}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
+        <article className={cloudgymFile ? "import-card selected" : "import-card"}><div className="import-source cloudgym"><span>C</span><div><strong>CloudGym</strong><small>Nome na coluna A · pagamento na F · valor bruto na H · desde a linha 3</small></div></div><label className="file-picker"><input key={cloudgymFile?.name ?? "cloudgym-empty"} type="file" accept=".xlsx,.xls,.csv" onChange={event => void importStudentFile("cloudgym", event.target.files?.[0])} /><span>{cloudgymFile ? "Trocar planilha" : "Selecionar planilha"}</span><small>Máximo de 1 MB</small></label>{studentImportErrors.cloudgym && <p className="import-error">{studentImportErrors.cloudgym}</p>}{cloudgymFile ? <div className="selected-file"><div><strong>{cloudgymFile.name}</strong><small>{cloudgymFile.size ? `${Math.max(1, Math.round(cloudgymFile.size / 1024))} KB · processada` : "Salva no histórico"}</small></div><button type="button" onClick={() => { setCloudgymFile(null); setCloudgymResult(null); setSavedClosing(null); setStudentImportErrors(current => ({ ...current, cloudgym: undefined })); }}>Remover</button></div> : <p>Nenhum arquivo selecionado.</p>}</article>
       </div>
       {wellhubResult && <section className="panel wellhub-ranking"><div><h3>Pessoas com 12 ou mais check-ins</h3><span>{wellhubResult.twelveOrMorePeople.length} pessoas</span></div>{wellhubResult.twelveOrMorePeople.length ? <ol>{wellhubResult.twelveOrMorePeople.map(person => <li key={`${person.name}-${person.checkins}`}><span>{person.name}</span><strong>{person.checkins} check-ins</strong></li>)}</ol> : <p>Nenhuma pessoa atingiu 12 check-ins.</p>}</section>}
     </section>}
