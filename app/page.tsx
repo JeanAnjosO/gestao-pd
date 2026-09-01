@@ -451,6 +451,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   useLayoutEffect(() => {
     const updateBoardZoom = () => {
       if (!boardRef.current?.parentElement) return;
+      if (!isManager) { boardRef.current.style.setProperty("zoom", "1"); return; }
       const availableWidth = boardRef.current.parentElement.clientWidth;
       boardRef.current.style.setProperty("zoom", String(window.innerWidth <= 760 ? Math.min(1, availableWidth / 900) : 1));
     };
@@ -459,7 +460,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     if (boardRef.current?.parentElement) observer.observe(boardRef.current.parentElement);
     window.addEventListener("resize", updateBoardZoom);
     return () => { observer.disconnect(); window.removeEventListener("resize", updateBoardZoom); };
-  }, [tab]);
+  }, [tab, isManager]);
 
   useEffect(() => {
     if (!unit) return;

@@ -377,4 +377,19 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
 @media(max-width:760px){
   .calendar-tabs.team-calendar-tab{display:flex;grid-template-columns:none}
   .calendar-tabs.team-calendar-tab button{width:100%}
+  .role-professor .calendar-board-scroll{width:100%;max-width:100%;margin:0;padding:0;overflow:hidden}
+  .role-professor .calendar-share-board{box-sizing:border-box;width:100%!important;min-height:0;margin:0;padding:10px!important;zoom:1!important}
+  .role-professor .share-board-heading{align-items:flex-start;gap:8px;margin-bottom:9px;padding-bottom:7px}
+  .role-professor .share-board-heading h3{font-size:17px}
+  .role-professor .share-board-heading strong{font-size:12px}
+  .role-professor .share-board-heading span,.role-professor .share-board-heading small{font-size:8px}
+  .role-professor .calendar-share-board th{width:auto!important;padding:5px 2px;font-size:7px;letter-spacing:0}
+  .role-professor .calendar-share-board th:nth-child(1){width:17%!important}
+  .role-professor .calendar-share-board th:nth-child(2),.role-professor .calendar-share-board th:nth-child(3){width:19%!important}
+  .role-professor .calendar-share-board th:nth-child(4){width:18%!important}
+  .role-professor .calendar-share-board th:nth-child(5){width:27%!important}
+  .role-professor .calendar-share-board td{height:auto;min-height:28px;padding:4px 2px;font-size:8px;line-height:1.2;overflow-wrap:anywhere;word-break:break-word}
+  .role-professor .calendar-share-board td:nth-child(2){display:table-cell}
+  .role-professor .board-week-row td{padding:4px;font-size:7px}
+  .role-professor .share-board-footer{gap:8px;margin-top:7px;font-size:7px}
 }
