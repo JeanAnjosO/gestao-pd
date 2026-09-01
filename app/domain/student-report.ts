@@ -12,6 +12,10 @@ export type CloudgymStudentReport = {
   frequentTotalPass: number;
 };
 
+export type HighestFrequencyReport = {
+  topPeople: { name: string; days: number }[];
+};
+
 type Cell = string | number | boolean | Date | null | undefined;
 type SheetRows = Cell[][];
 
@@ -64,4 +68,18 @@ export const calculateCloudgymReport = (rows: SheetRows): CloudgymStudentReport 
     if (payment === "totalpass" && gross !== null && gross > 90) frequentTotalPass.add(key);
   });
   return { enrolled: enrolled.size, frequentTotalPass: frequentTotalPass.size };
+};
+
+export const calculateHighestFrequencyReport = (rows: SheetRows): HighestFrequencyReport => {
+  const people = new Map<string, { name: string; days: number }>();
+  rows.slice(2).forEach(row => {
+    const name = cleanText(row[1]);
+    const key = personKey(row[1]);
+    if (!name || !key) return;
+    const current = people.get(key);
+    people.set(key, { name: current?.name ?? name, days: (current?.days ?? 0) + 1 });
+  });
+  return {
+    topPeople: [...people.values()].sort((a, b) => b.days - a.days || a.name.localeCompare(b.name, "pt-BR")).slice(0, 20),
+  };
 };

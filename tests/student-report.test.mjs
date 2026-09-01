@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { calculateCloudgymReport, calculateWellhubReport } from "../app/domain/student-report.ts";
+import { calculateCloudgymReport, calculateHighestFrequencyReport, calculateWellhubReport } from "../app/domain/student-report.ts";
 
 test("calculates Wellhub indicators from columns C and E starting at row 11", () => {
   const rows = Array.from({ length: 10 }, () => []);
@@ -30,4 +30,19 @@ test("deduplicates CloudGym names and applies payment rules", () => {
     ["Daniel", null, null, null, null, "Gympass", null, 150],
   ];
   assert.deepEqual(calculateCloudgymReport(rows), { enrolled: 1, frequentTotalPass: 1 });
+});
+
+test("ranks the 20 most repeated names from column B starting at row 3", () => {
+  const rows = [[], [],
+    [null, "Ana"], [null, "Bruno"], [null, " ana "], [null, "Carla"],
+    [null, "ANA"], [null, "Bruno"], [null, "Daniel"],
+  ];
+  assert.deepEqual(calculateHighestFrequencyReport(rows), {
+    topPeople: [
+      { name: "Ana", days: 3 },
+      { name: "Bruno", days: 2 },
+      { name: "Carla", days: 1 },
+      { name: "Daniel", days: 1 },
+    ],
+  });
 });

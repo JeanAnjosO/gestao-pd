@@ -87,7 +87,12 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /Número total de alunos/);
   assert.match(page, /Frequentes Wellhub/);
   assert.match(page, /Frequentes TotalPass/);
-  assert.match(page, /Pessoas com 12 ou mais check-ins/);
+  assert.match(page, /12 ou mais check-ins no Wellhub/);
+  assert.match(page, /Maiores frequências/);
+  assert.match(page, /calculateHighestFrequencyReport/);
+  assert.match(page, /Você tem certeza que quer salvar o fechamento\? Não será possível alterar as planilhas\./);
+  assert.match(page, /Baixar dashboard/);
+  assert.match(page, /disabled=\{Boolean\(savedClosing\)\}/);
   assert.match(page, /const totalStudents = \(wellhubResult\?\.frequent/);
   assert.equal((page.match(/const totalStudents =/g) ?? []).length, 1);
   assert.match(page, /student_count_closings/);
