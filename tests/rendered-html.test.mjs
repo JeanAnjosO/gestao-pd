@@ -52,6 +52,8 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /replace_schedule_from_date/);
   assert.match(page, /p_effective_on: localIsoDate\(\)/);
   assert.match(calendar, /export function chooseCalendarPerson/);
+  assert.match(calendar, /repeatedThisWeek/);
+  assert.match(calendar, /lowestRoleCount/);
   assert.match(page, /chooseCalendarPerson\(/);
   assert.match(page, /Mês atual/);
   assert.match(page, /Próximo mês/);
