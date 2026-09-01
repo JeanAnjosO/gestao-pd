@@ -427,6 +427,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const [assignments, setAssignments] = useState<CalendarAssignmentRow[]>([]);
   const [notes, setNotes] = useState<CalendarNoteRow[]>([]);
   const [absences, setAbsences] = useState<AbsenceRow[]>([]);
+  const [managerDays, setManagerDays] = useState<ManagerDayRow[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityRow[]>([]);
   const [tab, setTab] = useState<"planning" | "board">(role === "gestor" ? "planning" : "board");
   const [range, setRange] = useState<"month" | "first" | "second">("first");
@@ -450,17 +451,19 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   useEffect(() => {
     if (!unit) return;
     const load = async () => {
-      const [{ data: periodData }, { data: assignmentData }, { data: noteData }, { data: absenceData }, { data: capabilityData }] = await Promise.all([
+      const [{ data: periodData }, { data: assignmentData }, { data: noteData }, { data: absenceData }, { data: managerDayData }, { data: capabilityData }] = await Promise.all([
         supabase.from("calendar_periods").select("id,year,month,status,published_at").eq("unit_id", unit.id).eq("year", year).eq("month", month + 1).maybeSingle(),
         supabase.from("calendar_assignments").select("id,date,assignment_type_id,class_type_id,person_id,manually_assigned").eq("unit_id", unit.id).gte("date", start).lte("date", end).order("date"),
         supabase.from("calendar_day_notes").select("id,date,note").eq("unit_id", unit.id).gte("date", start).lte("date", end).order("date"),
         supabase.from("absences").select("id,date,person_id,created_by,created_at").eq("unit_id", unit.id).gte("date", start).lte("date", end),
+        supabase.from("manager_teaching_days").select("id,date,manager_id,created_by").eq("unit_id", unit.id).gte("date", start).lte("date", end),
         supabase.from("person_operational_capabilities").select("person_id,capability_type_id"),
       ]);
       setPeriod((periodData as CalendarPeriodRow | null) ?? null);
       setAssignments((assignmentData as CalendarAssignmentRow[] | null) ?? []);
       setNotes((noteData as CalendarNoteRow[] | null) ?? []);
       setAbsences((absenceData as AbsenceRow[] | null) ?? []);
+      setManagerDays((managerDayData as ManagerDayRow[] | null) ?? []);
       setCapabilities((capabilityData as CapabilityRow[] | null) ?? []);
     };
     void load();
@@ -478,7 +481,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const hasCapability = (personId: number, capabilityId: number) => capabilities.some(item => item.person_id === personId && item.capability_type_id === capabilityId);
   const scheduledFor = (date: string, includeReception = false) => {
     const weekday = new Date(`${date}T12:00:00`).getDay();
-    return people.filter(person => person.active && (includeReception || !isPersonType(person, "reception")) && !absences.some(item => item.date === date && item.person_id === person.id) && schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)));
+    return people.filter(person => person.active && (includeReception || !isPersonType(person, "reception")) && !absences.some(item => item.date === date && item.person_id === person.id) && (schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) || managerDays.some(extra => extra.manager_id === person.id && extra.date === date)));
   };
   const candidatesFor = (date: string, type: number, classId: number | null) => {
     if (type === ASSIGNMENT_TYPES.reception) {
