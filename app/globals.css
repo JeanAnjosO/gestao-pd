@@ -327,6 +327,27 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
 .student-history-actions { display:flex!important;align-items:center;gap:8px; }
 .student-history-actions>button:not(.primary) { border:1px solid var(--green);border-radius:9px;background:white;color:var(--green);padding:10px 14px;font-weight:700; }
 @media(max-width:760px){ .student-history-bar { grid-template-columns:1fr;align-items:stretch; } }
+.payroll-total { display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:16px;border-left:5px solid var(--green); }
+.payroll-total>div { display:grid;gap:8px; }
+.payroll-total small { font-weight:750;color:var(--muted); }
+.payroll-total strong { font-size:2rem;color:var(--green); }
+.payroll-total>span { color:var(--muted);font-size:.85rem; }
+.comparison-imports { margin-bottom:16px; }
+.comparison-imports>div,.enrollment-lists { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px; }
+.comparison-imports label { display:grid;gap:8px;min-width:0; }
+.comparison-imports input { max-width:100%; }
+.student-comparison { display:grid;gap:16px; }
+.student-comparison h3 { margin:0; }
+.student-comparison header p { color:var(--muted);margin:6px 0 0; }
+.student-comparison .student-dashboard { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.student-comparison .student-dashboard strong { font-size:1.55rem; }
+.enrollment-lists .student-ranking { min-width:0;margin:0; }
+.enrollment-lists li span { overflow-wrap:anywhere; }
+@media(max-width:650px) {
+  .payroll-total { align-items:flex-start;flex-direction:column; }
+  .comparison-imports>div,.enrollment-lists,.student-comparison .student-dashboard { grid-template-columns:1fr; }
+}
+.student-dashboard-exporting .student-comparison .student-dashboard,.student-dashboard-exporting .enrollment-lists { grid-template-columns:repeat(2,minmax(0,1fr)); }
 .student-dashboard { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px; }
 .student-dashboard article { display:grid;gap:4px;min-height:128px;padding:17px;border:2px solid var(--line);border-radius:12px;background:var(--paper); }
 .student-dashboard article small { color:var(--muted);font-weight:700; }

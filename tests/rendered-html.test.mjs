@@ -103,7 +103,7 @@ test("keeps shared domain concerns outside the page component", async () => {
   assert.match(page, /Baixar dashboard/);
   assert.match(page, /const canExportStudentDashboard = Boolean\(wellhubResult && cloudgymResult && highestFrequencyResult\)/);
   assert.match(page, /if \(!studentDashboardRef\.current \|\| !canExportStudentDashboard\) return/);
-  assert.match(page, /disabled=\{Boolean\(savedClosing\)\}/);
+  assert.match(page, /disabled=\{Boolean\(savedClosing\) \|\| closingBusy\}/);
   assert.match(page, /const totalStudents = \(wellhubResult\?\.frequent/);
   assert.equal((page.match(/const totalStudents =/g) ?? []).length, 1);
   assert.match(page, /student_count_closings/);

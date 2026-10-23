@@ -10,6 +10,7 @@ export type WellhubStudentReport = {
 export type CloudgymStudentReport = {
   enrolled: number;
   frequentTotalPass: number;
+  enrolledPeople?: string[] | null;
 };
 
 export type HighestFrequencyReport = {
@@ -56,7 +57,7 @@ export const calculateWellhubReport = (rows: SheetRows): WellhubStudentReport =>
 };
 
 export const calculateCloudgymReport = (rows: SheetRows): CloudgymStudentReport => {
-  const enrolled = new Set<string>();
+  const enrolled = new Map<string, string>();
   const frequentTotalPass = new Set<string>();
   rows.slice(2).forEach(row => {
     const name = cleanText(row[0]);
@@ -64,11 +65,28 @@ export const calculateCloudgymReport = (rows: SheetRows): CloudgymStudentReport 
     if (!name || !key) return;
     const payment = paymentKey(row[5]);
     const gross = numericValue(row[7]);
-    if (payment !== "totalpass" && payment !== "gympass") enrolled.add(key);
+    if (payment !== "totalpass" && payment !== "gympass" && !enrolled.has(key)) enrolled.set(key, name);
     if (payment === "totalpass" && gross !== null && gross > 90) frequentTotalPass.add(key);
   });
-  return { enrolled: enrolled.size, frequentTotalPass: frequentTotalPass.size };
+  return { enrolled: enrolled.size, frequentTotalPass: frequentTotalPass.size, enrolledPeople: [...enrolled.values()].sort((a, b) => a.localeCompare(b, "pt-BR")) };
 };
+
+export const compareEnrolledPeople = (current: string[], previous: string[]) => {
+  const currentKeys = new Set(current.map(personKey));
+  const previousKeys = new Set(previous.map(personKey));
+  return {
+    lost: previous.filter(name => !currentKeys.has(personKey(name))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+    added: current.filter(name => !previousKeys.has(personKey(name))).sort((a, b) => a.localeCompare(b, "pt-BR")),
+  };
+};
+
+export const previousStudentCompetence = (competence: string) => {
+  const [year, month] = competence.split("-").map(Number);
+  const previous = new Date(year, month - 2, 1);
+  return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, "0")}`;
+};
+
+export const studentDeltaLabel = (delta: number | null) => delta === null ? "Sem comparação" : delta > 0 ? `Aumento de ${delta}` : delta < 0 ? `Déficit de ${Math.abs(delta)}` : "Sem alteração (0)";
 
 export const calculateHighestFrequencyReport = (rows: SheetRows): HighestFrequencyReport => {
   const people = new Map<string, { name: string; days: number }>();
