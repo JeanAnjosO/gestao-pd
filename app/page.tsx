@@ -430,7 +430,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const [managerDays, setManagerDays] = useState<ManagerDayRow[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityRow[]>([]);
   const [tab, setTab] = useState<"planning" | "board">(role === "gestor" ? "planning" : "board");
-  const [range, setRange] = useState<"month" | "first" | "second">("first");
+  const [range, setRange] = useState<"month" | "first" | "second">("month");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const boardRef = useRef<HTMLDivElement>(null);
@@ -1068,7 +1068,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
       setExportingReport(false);
     }
   };
-  const rows = reportPeople.map(person => {
+  const rows = reportPeople.flatMap(person => {
     let total = 0;
     let complete = 0;
     const scheduledDays = days.filter(date => {
@@ -1093,6 +1093,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
     const baseIsHalf = schedules.some(item => item.person_id === person.id && item.daily_type === "half" && scheduleAppliesOn(item, monthEnd));
     const totalLabel = baseIsHalf && complete ? `${total}, ${complete} comp` : String(total);
     const approvedSolo = soloRows.filter(item => item.teacher_id === person.id && item.status === "approved" && item.date.startsWith(prefix)).length;
+    if (!person.active && total === 0 && approvedSolo === 0) return [];
     const absenceCount = absences.filter(item => item.person_id === person.id).length;
     const functionLabel = isPersonType(person, "teacher") ? "Professor(a)" : isPersonType(person, "reception") ? "Recepção" : "Estagiário(a)";
     const rate = rates.find(item => item.level_code === (isPersonType(person, "intern") ? 0 : person.level));
@@ -1101,7 +1102,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
     const fixedCount = isPersonType(person, "intern") ? dailyTypes.length : 0;
     const dailyAmount = fixedCount ? fixedCount * (rate?.fixed_daily_amount ?? 0) : halfCount * (rate?.half_day_amount ?? 0) + fullCount * (rate?.full_day_amount ?? 0);
     const soloAmount = isPersonType(person, "teacher") ? approvedSolo * (rate?.hourly_amount ?? 0) * 0.3 : 0;
-    return [displayName(person), totalLabel, isPersonType(person, "teacher") ? String(approvedSolo) : "—", paymentCell(dailyAmount, soloAmount, halfCount, fullCount, fixedCount, approvedSolo), String(absenceCount), functionLabel, personLevelLabel(person)];
+    return [[displayName(person), totalLabel, isPersonType(person, "teacher") ? String(approvedSolo) : "—", paymentCell(dailyAmount, soloAmount, halfCount, fullCount, fixedCount, approvedSolo), String(absenceCount), functionLabel, personLevelLabel(person)]];
   });
   const externalRows = Array.from(new Set(substitutions.filter(item => !item.substitute_person_id && item.external_name && item.date.startsWith(prefix) && unitIsOpenOn(item.date, openingDays, operationExceptions)).map(item => item.external_name!.trim()))).map(name => {
     const records = substitutions.filter(item => !item.substitute_person_id && item.external_name?.trim() === name && item.date.startsWith(prefix) && unitIsOpenOn(item.date, openingDays, operationExceptions));
