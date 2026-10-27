@@ -450,6 +450,7 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
 .student-calendar-poster .student-event-workshop { background:#b4dded; color:#133f50; }
 .student-calendar-poster .student-event-holiday { background:#f2beb8; color:#602722; }
 .student-calendar-poster .student-event-notice { background:#f7e3a7; color:#5b4617; }
+.student-calendar-poster .student-event-simulation { background:#f6c99e; color:#663a12; }
 .student-calendar-footer { padding-top:22px; display:flex; flex-direction:column; gap:16px; }
 .student-calendar-footer>div { display:flex; gap:24px; font-size:14px; }
 .student-calendar-footer span { display:flex; align-items:center; gap:8px; }

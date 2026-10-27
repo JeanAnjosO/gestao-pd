@@ -8,8 +8,8 @@ import { studentDayContent, studentMonthDays, type StudentCalendarCategory, type
 import type { CalendarNoteRow, OperationExceptionRow, UnitRow } from "../domain/types";
 
 const categories: { value: StudentCalendarCategory; label: string }[] = [
-  { value: "event", label: "Evento" }, { value: "workshop", label: "Workshop" },
-  { value: "holiday", label: "Feriado" }, { value: "notice", label: "Aviso" },
+  { value: "event", label: "Evento da unidade" }, { value: "workshop", label: "Exame" },
+  { value: "holiday", label: "Feriado" }, { value: "simulation", label: "Simulado" }, { value: "notice", label: "Aviso" },
 ];
 
 export function StudentCalendar({ unit, personId, year, month, planningNotes, holidays }: {

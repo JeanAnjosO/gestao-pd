@@ -1,4 +1,4 @@
-export type StudentCalendarCategory = "event" | "workshop" | "holiday" | "notice";
+export type StudentCalendarCategory = "event" | "workshop" | "holiday" | "simulation" | "notice";
 export type StudentCalendarNote = { date: string; note: string; category: StudentCalendarCategory };
 
 export function studentMonthDays(year: number, month: number) {
