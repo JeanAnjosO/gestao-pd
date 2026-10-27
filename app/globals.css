@@ -418,3 +418,41 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
   .role-professor .board-week-row td{padding:4px;font-size:7px}
   .role-professor .share-board-footer{gap:8px;margin-top:7px;font-size:7px}
 }
+/* Calendar for students: export keeps a fixed canvas; the preview scales to fit. */
+.student-calendar-area { display: grid; gap: 18px; }
+.student-calendar-controls { display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.student-calendar-controls p,.student-calendar-editor p { margin:6px 0 0; color:#59665f; line-height:1.5; max-width:720px; }
+.student-calendar-buttons { display:flex; gap:10px; flex-wrap:wrap; }
+.student-calendar-controls .student-calendar-buttons { flex-shrink:0; }
+.student-calendar-editor { display:grid; gap:16px; }
+.student-calendar-editor label { display:grid; gap:7px; font-weight:600; }
+.student-calendar-editor textarea { padding:12px; border:1px solid #cbd5d0; border-radius:10px; font:inherit; resize:vertical; }
+.student-calendar-preview { width:100%; min-width:0; overflow:hidden; border-radius:18px; }
+.student-calendar-poster { width:1120px; box-sizing:border-box; padding:44px 46px 30px; background:#f8f7f1; color:#203c31; font-family:Arial,sans-serif; position:relative; }
+.student-calendar-heading { display:flex; height:auto; background:transparent; justify-content:space-between; align-items:flex-end; border-top:8px solid #308d66; border-bottom:0; padding:24px 0 28px; }
+.student-calendar-heading>div { display:flex; flex-direction:column; gap:8px; }
+.student-calendar-heading>div:last-child { text-align:right; }
+.student-calendar-heading span { font-size:17px; letter-spacing:2px; text-transform:uppercase; }
+.student-calendar-heading h2 { margin:0; font-family:Georgia,serif; font-style:italic; font-size:76px; line-height:1.08; color:#308d66; text-transform:capitalize; }
+.student-calendar-heading strong { font-size:38px; font-weight:500; }
+.student-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); border-top:1px solid #8ba697; border-left:1px solid #8ba697; }
+.student-calendar-weekday { padding:16px 8px; background:#308d66; color:white; text-align:center; font-size:18px; font-weight:700; letter-spacing:1px; border-right:1px solid #8ba697; border-bottom:1px solid #8ba697; }
+.student-calendar-date,.student-calendar-blank { min-height:126px; border:0; border-right:1px solid #8ba697; border-bottom:1px solid #8ba697; border-radius:0; background:transparent; }
+.student-calendar-date { display:flex; flex-direction:column; justify-content:flex-start; align-items:stretch; gap:12px; padding:12px 10px 16px; color:#203c31; text-align:left; cursor:pointer; font:inherit; box-shadow:none; }
+.student-calendar-date b { align-self:flex-end; font-size:25px; line-height:1.2; font-weight:500; }
+.student-calendar-date span { display:block; white-space:pre-wrap; overflow-wrap:anywhere; font-size:16px; line-height:1.4; }
+.student-calendar-date.student-weekend:not([class*="student-event-"]) { background:#eef0e8; }
+.student-calendar-date:hover { outline:3px solid #245e46; outline-offset:-3px; }
+.student-calendar-date:disabled { opacity:1; cursor:default; }
+.student-calendar-date:focus-visible { outline:3px solid #102d21; outline-offset:-3px; }
+.student-calendar-blank { background:#f1f0e9; }
+.student-calendar-poster .student-event-event { background:#cce9a6; color:#173c24; }
+.student-calendar-poster .student-event-workshop { background:#b4dded; color:#133f50; }
+.student-calendar-poster .student-event-holiday { background:#f2beb8; color:#602722; }
+.student-calendar-poster .student-event-notice { background:#f7e3a7; color:#5b4617; }
+.student-calendar-footer { padding-top:22px; display:flex; flex-direction:column; gap:16px; }
+.student-calendar-footer>div { display:flex; gap:24px; font-size:14px; }
+.student-calendar-footer span { display:flex; align-items:center; gap:8px; }
+.student-calendar-footer i { display:inline-block; width:15px; height:15px; border:1px solid #8ba697; border-radius:3px; }
+.student-calendar-footer p { margin:0; font-size:16px; color:#47715b; }
+@media(max-width:760px) { .student-calendar-controls { align-items:stretch; flex-direction:column; } .calendar-tabs { flex-wrap:wrap; } }

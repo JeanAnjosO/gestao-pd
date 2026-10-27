@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toPng } from "html-to-image";
 import { supabase } from "./supabase";
+import { StudentCalendar } from "./components/StudentCalendar";
 import { InstallAppPrompt } from "./components/InstallAppPrompt";
 import { Stat, Table, Title } from "./components/ui";
 import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteRow, CalendarPeriodRow, CapabilityRow, ClassRow, CompensationRateRow, DailyOverrideRow, FunctionTypeId, ManagerDayRow, MonthlyPeriodEventRow, MonthlyPeriodRow, OperationExceptionRow, PasswordRecoveryRow, PersonRow, PersonTypeId, Profile, Role, ScheduleRow, Screen, SoloRow, SubstitutionRow, UnitRow } from "./domain/types";
@@ -423,13 +424,14 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
 
 function OperationalCalendar({ role, profile, unit, openingDays, operationExceptions, people, schedules }: { role: Role; profile: Profile; unit?: UnitRow; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[] }) {
   const [viewMonth, setViewMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [loadedMonth, setLoadedMonth] = useState("");
   const [period, setPeriod] = useState<CalendarPeriodRow | null>(null);
   const [assignments, setAssignments] = useState<CalendarAssignmentRow[]>([]);
   const [notes, setNotes] = useState<CalendarNoteRow[]>([]);
   const [absences, setAbsences] = useState<AbsenceRow[]>([]);
   const [managerDays, setManagerDays] = useState<ManagerDayRow[]>([]);
   const [capabilities, setCapabilities] = useState<CapabilityRow[]>([]);
-  const [tab, setTab] = useState<"planning" | "board">(role === "gestor" ? "planning" : "board");
+  const [tab, setTab] = useState<"planning" | "board" | "students">(role === "gestor" ? "planning" : "board");
   const [range, setRange] = useState<"month" | "first" | "second">("month");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -473,6 +475,8 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
         supabase.from("manager_teaching_days").select("id,date,manager_id,created_by").eq("unit_id", unit.id).gte("date", start).lte("date", end),
         supabase.from("person_operational_capabilities").select("person_id,capability_type_id"),
       ]);
+      if (cancelled) return;
+      setLoadedMonth(`${unit.id}-${start}`);
       setPeriod((periodData as CalendarPeriodRow | null) ?? null);
       setAssignments((assignmentData as CalendarAssignmentRow[] | null) ?? []);
       setNotes((noteData as CalendarNoteRow[] | null) ?? []);
@@ -655,11 +659,11 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     <Title title="Calendário" text={unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples de Roda, Som e Portaria." : "Escala por cores: Branca, Azul e Preta."} />
     <div className="calendar-toolbar panel">
       {isManager ? <div className="calendar-month-nav"><button onClick={() => setViewMonth(new Date(year, month - 1, 1))}>‹</button><strong>{monthLabel}</strong><button onClick={() => setViewMonth(new Date(year, month + 1, 1))}>›</button></div> : <div className="calendar-current-month"><strong>{monthLabel}</strong></div>}
-      <div className={`calendar-tabs ${isManager ? "" : "team-calendar-tab"}`}>{isManager && <button className={tab === "planning" ? "active" : ""} onClick={() => setTab("planning")}>Planejamento</button>}<button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>{isManager ? "Quadro para compartilhar" : "Escala"}</button></div>
+      <div className={`calendar-tabs ${isManager ? "" : "team-calendar-tab"}`}>{isManager && <button className={tab === "planning" ? "active" : ""} onClick={() => setTab("planning")}>Planejamento</button>}<button className={tab === "board" ? "active" : ""} onClick={() => setTab("board")}>{isManager ? "Quadro para compartilhar" : "Escala"}</button>{isManager && <button className={tab === "students" ? "active" : ""} onClick={() => setTab("students")}>Calendário dos alunos</button>}</div>
       <span className={`calendar-status ${period?.status ?? "draft"}`}>{period?.status === "published" ? "Publicado" : "Rascunho"}</span>
     </div>
     {message && <p className="operation-message calendar-message">{message}</p>}
-    {tab === "planning" ? <div className="calendar-planning">
+    {tab === "students" && isManager ? loadedMonth !== `${unit.id}-${start}` ? <div className="panel" role="status">Carregando calendário…</div> : period?.status === "published" ? <StudentCalendar key={`${unit.id}-${start}`} unit={unit} personId={profile.id} year={year} month={month} planningNotes={notes} holidays={operationExceptions} /> : <div className="panel calendar-empty"><strong>Publique a escala para gerar o calendário dos alunos</strong><p>Depois da publicação, todos os dias do mês e as observações do planejamento aparecerão aqui.</p></div> : tab === "planning" ? <div className="calendar-planning">
       {isManager && <div className="calendar-actions panel"><div><strong>{missingCount || conflictCount ? `${missingCount} pendentes · ${conflictCount} afetadas por falta` : "Escala completa"}</strong><small>Ao refazer, dias anteriores e observações são preservados.</small></div><button className="primary" disabled={busy} onClick={assignments.length ? rebuildCalendar : () => generateCalendar()}>{busy ? "Gerando…" : assignments.length ? "Refazer calendário" : "Montar calendário"}</button><button className="delete-action" disabled={busy || (!assignments.length && !notes.length)} onClick={clearCalendar}>Limpar calendário</button><button disabled={!period || busy} onClick={publishCalendar}>Publicar escala</button></div>}
       <div className="calendar-days">{days.map(date => { const holiday = isHolidayOn(date, operationExceptions); const hasConflict = !holiday && assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)); return <section className={`calendar-day-card ${holiday ? "holiday-card" : requiredSlots.some(slot => slot.date === date && !assignmentFor(date, slot.type, slot.classId)) ? "has-pending" : ""} ${hasConflict ? "has-conflict" : ""}`} key={date}><header><div><strong>{formatDay(date)}</strong><small>{holiday ? "FERIADO" : hasConflict ? "Atenção: responsável com falta" : unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples" : "3 turmas"}</small></div>{holiday ? <input value="FERIADO" aria-label={`Observação de ${date}`} disabled readOnly /> : isManager ? <input maxLength={240} defaultValue={notes.find(item => item.date === date)?.note ?? ""} placeholder="Observação do dia" onBlur={event => saveNote(date, event.target.value)} /> : <span>{notes.find(item => item.date === date)?.note || "Sem observação"}</span>}</header><div className="calendar-day-rows">{classSlots.map(classType => <div className={`calendar-duty-row class-${classType.code}`} key={classType.id ?? "simple"}>{classType.id && <span className="class-marker">{classType.label}</span>}<label><small>Roda</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 1, classType.id) : <strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong>}</label><label><small>Som</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 2, classType.id) : <strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong>}</label></div>)}</div><div className="calendar-reception"><small>Portaria</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 3, null) : <strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong>}</div></section>; })}</div>
     </div> : <div className="calendar-board-area">
