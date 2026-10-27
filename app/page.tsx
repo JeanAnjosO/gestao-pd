@@ -425,6 +425,8 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
 function OperationalCalendar({ role, profile, unit, openingDays, operationExceptions, people, schedules }: { role: Role; profile: Profile; unit?: UnitRow; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[] }) {
   const [viewMonth, setViewMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [loadedMonth, setLoadedMonth] = useState("");
+  const [calendarLoadError, setCalendarLoadError] = useState(false);
+  const [calendarLoadAttempt, setCalendarLoadAttempt] = useState(0);
   const [period, setPeriod] = useState<CalendarPeriodRow | null>(null);
   const [assignments, setAssignments] = useState<CalendarAssignmentRow[]>([]);
   const [notes, setNotes] = useState<CalendarNoteRow[]>([]);
@@ -466,8 +468,11 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
 
   useEffect(() => {
     if (!unit) return;
+    let cancelled = false;
+    setCalendarLoadError(false);
+    const timeout = window.setTimeout(() => { if (!cancelled) setCalendarLoadError(true); }, 20000);
     const load = async () => {
-      const [{ data: periodData }, { data: assignmentData }, { data: noteData }, { data: absenceData }, { data: managerDayData }, { data: capabilityData }] = await Promise.all([
+      const results = await Promise.all([
         supabase.from("calendar_periods").select("id,year,month,status,published_at").eq("unit_id", unit.id).eq("year", year).eq("month", month + 1).maybeSingle(),
         supabase.from("calendar_assignments").select("id,date,assignment_type_id,class_type_id,person_id,manually_assigned").eq("unit_id", unit.id).gte("date", start).lte("date", end).order("date"),
         supabase.from("calendar_day_notes").select("id,date,note").eq("unit_id", unit.id).gte("date", start).lte("date", end).order("date"),
@@ -476,6 +481,9 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
         supabase.from("person_operational_capabilities").select("person_id,capability_type_id"),
       ]);
       if (cancelled) return;
+      if (results.some(result => result.error)) throw new Error("Não foi possível carregar o calendário");
+      const [{ data: periodData }, { data: assignmentData }, { data: noteData }, { data: absenceData }, { data: managerDayData }, { data: capabilityData }] = results;
+      setCalendarLoadError(false);
       setLoadedMonth(`${unit.id}-${start}`);
       setPeriod((periodData as CalendarPeriodRow | null) ?? null);
       setAssignments((assignmentData as CalendarAssignmentRow[] | null) ?? []);
@@ -484,8 +492,9 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
       setManagerDays((managerDayData as ManagerDayRow[] | null) ?? []);
       setCapabilities((capabilityData as CapabilityRow[] | null) ?? []);
     };
-    void load();
-  }, [unit?.id, year, month, start, end]);
+    void load().catch(() => { if (!cancelled) setCalendarLoadError(true); }).finally(() => window.clearTimeout(timeout));
+    return () => { cancelled = true; window.clearTimeout(timeout); };
+  }, [unit?.id, year, month, start, end, calendarLoadAttempt]);
 
   if (!unit) return <><Title title="Calendário" text="Selecione uma unidade para consultar a escala." /></>;
   const days = Array.from({ length: new Date(year, month + 1, 0).getDate() }, (_, index) => {
@@ -653,6 +662,7 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     const options = currentPerson && !candidates.some(person => person.id === currentPerson.id) ? [currentPerson, ...candidates] : candidates;
     return <select aria-label={`${type === 1 ? "Roda" : type === 2 ? "Som" : "Portaria"} em ${date}`} value={current?.person_id ?? ""} onChange={event => changeAssignment(date, type, classId, Number(event.target.value))}><option value="">Pendente</option>{options.map(person => <option key={person.id} value={person.id}>{displayName(person)}</option>)}</select>;
   };
+  if (calendarLoadError) return <><Title title="Calendário" text={monthLabel} /><div className="panel" role="alert"><p>Não foi possível carregar o calendário. Verifique sua conexão e tente novamente.</p><button className="primary" onClick={() => setCalendarLoadAttempt(value => value + 1)}>Tentar novamente</button></div></>;
   if (!isManager && period?.status !== "published") return <><Title title="Calendário" text="Consulte as funções da equipe por dia de aula." /><div className="panel calendar-empty"><strong>Calendário ainda não publicado</strong><p>A gestão está preparando a escala de {monthLabel}.</p><div className="calendar-current-month"><span>{monthLabel}</span></div></div></>;
 
   return <>

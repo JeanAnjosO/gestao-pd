@@ -32,12 +32,15 @@ export function StudentCalendar({ unit, personId, year, month, planningNotes, ho
   useEffect(() => {
     let cancelled = false;
     setLoading(true); setLoadError(false);
+    const timeout = window.setTimeout(() => {
+      if (!cancelled) { setLoadError(true); setLoading(false); }
+    }, 20000);
     void (async () => {
       const { data, error } = await supabase.from("student_calendar_notes").select("date,note,category").eq("unit_id", unit.id).gte("date", days[0]).lte("date", days.at(-1)!);
       if (cancelled) return;
       setLoadError(Boolean(error)); setNotes((data as StudentCalendarNote[] | null) ?? []); setLoading(false);
-    })();
-    return () => { cancelled = true; };
+    })().catch(() => { if (!cancelled) { setLoadError(true); setLoading(false); } }).finally(() => window.clearTimeout(timeout));
+    return () => { cancelled = true; window.clearTimeout(timeout); };
   }, [unit.id, year, month, reload]);
 
   useLayoutEffect(() => {
