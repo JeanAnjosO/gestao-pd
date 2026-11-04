@@ -457,3 +457,6 @@ header>div:first-child { display:grid; }header small { color:var(--muted);font-s
 .student-calendar-footer i { display:inline-block; width:15px; height:15px; border:1px solid #8ba697; border-radius:3px; }
 .student-calendar-footer p { margin:0; font-size:16px; color:#47715b; }
 @media(max-width:760px) { .student-calendar-controls { align-items:stretch; flex-direction:column; } .calendar-tabs { flex-wrap:wrap; } }
+
+.student-trend { font-style: normal; font-weight: 400; font-size: 0.78rem; line-height: 1.5; overflow-wrap: anywhere; }
+.student-rules-note { padding: 12px 16px; background: #fff5d6; border-radius: 12px; font-size: .85rem; line-height: 1.5; }

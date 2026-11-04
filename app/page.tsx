@@ -10,7 +10,7 @@ import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteR
 import { ADMIN_ACCESS_ROLE_ID, APP_RELEASE, ASSIGNMENT_TYPES, CALENDAR_MODES, CALENDAR_TEAM_RELEASE_AT, CAPABILITIES, CLASS_TYPES, FUNCTION_TYPES, MOBILE_SESSION_MS, menus, menuIcons, PERSON_TYPES, RECEPTION_PRIORITY_PERSON_IDS, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY, WEB_INACTIVITY_MS, functionTypeOptions, labels, personTypeOptions, week } from "./domain/constants";
 import { clearSessionMetadata, displayName, formatCurrency, isHolidayOn, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
 import { chooseCalendarPerson } from "./domain/calendar";
-import { calculateCloudgymReport, calculateHighestFrequencyReport, calculateWellhubReport, compareEnrolledPeople, previousStudentCompetence, studentDeltaLabel, MAX_STUDENT_IMPORT_BYTES, parseWorkbookRows, type CloudgymStudentReport, type HighestFrequencyReport, type WellhubStudentReport } from "./domain/student-report";
+import { calculateCloudgymReport, calculateHighestFrequencyReport, calculateWellhubReport, compareEnrolledPeople, previousStudentCompetence, studentDeltaLabel, studentTrendLabel, MAX_STUDENT_IMPORT_BYTES, parseWorkbookRows, type CloudgymStudentReport, type HighestFrequencyReport, type WellhubStudentReport } from "./domain/student-report";
 
 export default function Home() {
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -921,6 +921,8 @@ type StudentClosingRow = {
   wellhub_frequent: number;
   wellhub_twelve_or_more: number;
   wellhub_below_four: number;
+  wellhub_below_eight: number | null;
+  frequency_rules_version: number;
   wellhub_twelve_or_more_people: { name: string; checkins: number }[];
   cloudgym_enrolled: number;
   cloudgym_frequent_totalpass: number;
@@ -1022,7 +1024,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
     setWellhubResult(null);
     setHighestFrequencyResult(null);
     const [priorYear, priorMonth] = previousStudentCompetence(studentCompetence).split("-").map(Number);
-    const columns = "id,year,month,wellhub_frequent,wellhub_twelve_or_more,wellhub_below_four,wellhub_twelve_or_more_people,cloudgym_enrolled,cloudgym_frequent_totalpass,cloudgym_enrolled_people,wellhub_file_name,cloudgym_file_name,highest_frequency_people,highest_frequency_file_name,saved_at";
+    const columns = "id,year,month,wellhub_frequent,wellhub_twelve_or_more,wellhub_below_four,wellhub_below_eight,frequency_rules_version,wellhub_twelve_or_more_people,cloudgym_enrolled,cloudgym_frequent_totalpass,cloudgym_enrolled_people,wellhub_file_name,cloudgym_file_name,highest_frequency_people,highest_frequency_file_name,saved_at";
     void Promise.all([
       supabase.from("student_count_closings").select(columns).eq("unit_id", unitId).eq("year", closingYear).eq("month", closingMonth).maybeSingle(),
       supabase.from("student_count_closings").select(columns).eq("unit_id", unitId).eq("year", priorYear).eq("month", priorMonth).maybeSingle(),
@@ -1033,7 +1035,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
       if (prior.error) setComparisonError("Não foi possível carregar o mês anterior. Tente selecionar a competência novamente.");
       const closing = data as StudentClosingRow | null;
       setSavedClosing(closing);
-      setWellhubResult(closing ? { frequent: closing.wellhub_frequent, twelveOrMore: closing.wellhub_twelve_or_more, belowFour: closing.wellhub_below_four, twelveOrMorePeople: closing.wellhub_twelve_or_more_people ?? [] } : null);
+      setWellhubResult(closing ? { frequent: closing.wellhub_frequent, twelveOrMore: closing.wellhub_twelve_or_more, belowFour: closing.wellhub_below_four, belowEight: closing.wellhub_below_eight ?? 0, twelveOrMorePeople: closing.wellhub_twelve_or_more_people ?? [] } : null);
       setCloudgymResult(closing ? { enrolled: closing.cloudgym_enrolled, frequentTotalPass: closing.cloudgym_frequent_totalpass, enrolledPeople: closing.cloudgym_enrolled_people } : null);
       setHighestFrequencyResult(closing ? { topPeople: closing.highest_frequency_people ?? [] } : null);
       setWellhubFile(closing?.wellhub_file_name ? { name: closing.wellhub_file_name, size: 0 } : null);
@@ -1052,6 +1054,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
     const payload = {
       unit_id: unitId, year: closingYear, month: closingMonth,
       wellhub_frequent: wellhubResult.frequent, wellhub_twelve_or_more: wellhubResult.twelveOrMore,
+      frequency_rules_version: 2, wellhub_below_eight: wellhubResult.belowEight,
       wellhub_below_four: wellhubResult.belowFour, wellhub_twelve_or_more_people: wellhubResult.twelveOrMorePeople,
       cloudgym_enrolled: cloudgymResult.enrolled, cloudgym_frequent_totalpass: cloudgymResult.frequentTotalPass,
       cloudgym_enrolled_people: cloudgymResult.enrolledPeople ?? null,
@@ -1059,7 +1062,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
       highest_frequency_people: highestFrequencyResult.topPeople, highest_frequency_file_name: highestFrequencyFile?.name ?? null,
       saved_by: profile.id, saved_at: new Date().toISOString(),
     };
-    const { data, error } = await supabase.from("student_count_closings").insert(payload).select("id,year,month,wellhub_frequent,wellhub_twelve_or_more,wellhub_below_four,wellhub_twelve_or_more_people,cloudgym_enrolled,cloudgym_frequent_totalpass,cloudgym_enrolled_people,wellhub_file_name,cloudgym_file_name,highest_frequency_people,highest_frequency_file_name,saved_at").single();
+    const { data, error } = await supabase.from("student_count_closings").insert(payload).select("id,year,month,wellhub_frequent,wellhub_twelve_or_more,wellhub_below_four,wellhub_below_eight,frequency_rules_version,wellhub_twelve_or_more_people,cloudgym_enrolled,cloudgym_frequent_totalpass,cloudgym_enrolled_people,wellhub_file_name,cloudgym_file_name,highest_frequency_people,highest_frequency_file_name,saved_at").single();
     if (error) setClosingMessage("Não foi possível salvar o fechamento. Tente novamente.");
     else { setSavedClosing(data as StudentClosingRow); setClosingMessage("Fechamento salvo com sucesso."); }
     setClosingBusy(false);
@@ -1180,6 +1183,8 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
   const enrollmentChanges = currentNames && priorNames ? compareEnrolledPeople(currentNames, priorNames) : null;
   const enrolledDelta = cloudgymResult && priorCloudgym ? cloudgymResult.enrolled - priorCloudgym.enrolled : null;
   const totalDelta = wellhubResult && cloudgymResult && previousClosing ? totalStudents - (previousClosing.wellhub_frequent + previousClosing.cloudgym_enrolled + previousClosing.cloudgym_frequent_totalpass) : null;
+  const legacyFrequencyRules = Boolean(savedClosing && savedClosing.frequency_rules_version !== 2);
+  const trend = (current: number | null | undefined, previous: number | null | undefined) => <em className="student-trend"> - {studentTrendLabel(current, previous)}</em>;
   const studentCompetenceLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(`${studentCompetence}-01T12:00:00`));
   return <>
     <Title title="Relatórios" text="Acesse o fechamento mensal ou importe as bases de número de alunos." />
@@ -1204,18 +1209,19 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
       </div></section>}
       {comparisonError && <p className="import-error" role="alert">{comparisonError}</p>}
       <div className="student-dashboard-surface" ref={studentDashboardRef}>
+      {(legacyFrequencyRules || (previousClosing && previousClosing.frequency_rules_version !== 2)) && <p className="student-rules-note">Histórico com regras anteriores: Wellhub ≥ 4 check-ins, Check-ins &lt; 4 e TotalPass &gt; R$ 90. Fechamentos antigos mantêm os valores originais; as comparações de frequentes e total podem refletir a mudança de regra.</p>}
       <div className="student-dashboard-image-title"><span>GESTÃO PD</span><div><small>Fechamento mensal · Número de alunos</small><h3>{studentCompetenceLabel}</h3></div></div>
       <div className="student-dashboard">
-        <article className="student-total"><small>Número total de alunos</small><strong>{wellhubResult || cloudgymResult ? totalStudents : "—"}</strong><span>Frequentes Wellhub + Matriculados + Frequentes TotalPass</span></article>
-        <article className="metric-blue"><small>Matriculados</small><strong>{cloudgymResult?.enrolled ?? "—"}</strong></article>
-        <article className="metric-light-green"><small>Check-ins &gt;= 12</small><strong>{wellhubResult?.twelveOrMore ?? "—"}</strong></article>
-        <article className="metric-alert"><small>Check-ins &lt; 4</small><strong>{wellhubResult?.belowFour ?? "—"}</strong></article>
-        <article><small>Frequentes Wellhub</small><strong>{wellhubResult?.frequent ?? "—"}</strong></article>
-        <article className="metric-dark-green"><small>Frequentes TotalPass</small><strong>{cloudgymResult?.frequentTotalPass ?? "—"}</strong></article>
+        <article className="student-total"><small>Número total de alunos{trend(wellhubResult && cloudgymResult ? totalStudents : null, previousClosing ? previousClosing.wellhub_frequent + previousClosing.cloudgym_enrolled + previousClosing.cloudgym_frequent_totalpass : null)}</small><strong>{wellhubResult || cloudgymResult ? totalStudents : "—"}</strong><span>Frequentes Wellhub + Matriculados + Frequentes TotalPass</span></article>
+        <article className="metric-blue"><small>Matriculados{trend(cloudgymResult?.enrolled, priorCloudgym?.enrolled)}</small><strong>{cloudgymResult?.enrolled ?? "—"}</strong></article>
+        <article className="metric-light-green"><small>Check-ins &gt;= 12{trend(wellhubResult?.twelveOrMore, previousClosing?.wellhub_twelve_or_more)}</small><strong>{wellhubResult?.twelveOrMore ?? "—"}</strong></article>
+        <article className="metric-alert"><small>Check-ins &lt; {legacyFrequencyRules ? 4 : 8}{trend(wellhubResult ? legacyFrequencyRules ? wellhubResult.belowFour : wellhubResult.belowEight : null, previousClosing ? legacyFrequencyRules ? previousClosing.wellhub_below_four : previousClosing.wellhub_below_eight : null)}</small><strong>{wellhubResult ? legacyFrequencyRules ? wellhubResult.belowFour : wellhubResult.belowEight : "—"}</strong></article>
+        <article><small>Frequentes Wellhub{trend(wellhubResult?.frequent, previousClosing?.wellhub_frequent)}</small><strong>{wellhubResult?.frequent ?? "—"}</strong></article>
+        <article className="metric-dark-green"><small>Frequentes TotalPass{trend(cloudgymResult?.frequentTotalPass, priorCloudgym?.frequentTotalPass)}</small><strong>{cloudgymResult?.frequentTotalPass ?? "—"}</strong></article>
       </div>
       <section className="student-comparison" aria-label="Comparação com o mês anterior"><header><h3>Comparação mensal</h3><p>{studentCompetence} em relação a {priorCompetence}</p></header><div className="student-dashboard">
-        <article className={enrolledDelta === null ? "" : enrolledDelta < 0 ? "metric-alert" : "metric-dark-green"}><small>Diferença de alunos matriculados</small><strong>{studentDeltaLabel(enrolledDelta)}</strong><span>{enrolledDelta === null ? "Carregue o CloudGym atual e o histórico ou a planilha do mês anterior." : `${priorCloudgym?.enrolled} → ${cloudgymResult?.enrolled} matriculados`}</span></article>
-        <article className={totalDelta === null ? "" : totalDelta < 0 ? "metric-alert" : "metric-dark-green"}><small>Diferença no número total de alunos</small><strong>{studentDeltaLabel(totalDelta)}</strong><span>{totalDelta === null ? "Necessário fechamento salvo do mês anterior e bases atuais Wellhub e CloudGym." : `${previousClosing!.wellhub_frequent + previousClosing!.cloudgym_enrolled + previousClosing!.cloudgym_frequent_totalpass} → ${totalStudents} alunos`}</span></article>
+        <article className={enrolledDelta === null ? "" : enrolledDelta < 0 ? "metric-alert" : "metric-dark-green"}><small>Diferença de alunos matriculados{trend(cloudgymResult?.enrolled, priorCloudgym?.enrolled)}</small><strong>{studentDeltaLabel(enrolledDelta)}</strong><span>{enrolledDelta === null ? "Carregue o CloudGym atual e o histórico ou a planilha do mês anterior." : `${priorCloudgym?.enrolled} → ${cloudgymResult?.enrolled} matriculados`}</span></article>
+        <article className={totalDelta === null ? "" : totalDelta < 0 ? "metric-alert" : "metric-dark-green"}><small>Diferença no número total de alunos{trend(wellhubResult && cloudgymResult ? totalStudents : null, previousClosing ? previousClosing.wellhub_frequent + previousClosing.cloudgym_enrolled + previousClosing.cloudgym_frequent_totalpass : null)}</small><strong>{studentDeltaLabel(totalDelta)}</strong><span>{totalDelta === null ? "Necessário fechamento salvo do mês anterior e bases atuais Wellhub e CloudGym." : `${previousClosing!.wellhub_frequent + previousClosing!.cloudgym_enrolled + previousClosing!.cloudgym_frequent_totalpass} → ${totalStudents} alunos`}</span></article>
       </div><div className="enrollment-lists">{([{ title: "Perdas de matrícula", names: enrollmentChanges?.lost, empty: "Nenhuma perda de matrícula." }, { title: "Novos alunos matriculados", names: enrollmentChanges?.added, empty: "Nenhuma nova matrícula." }]).map(list => <section className="panel student-ranking" key={list.title}><div><h3>{list.title}</h3><span>{list.names ? `${list.names.length} pessoas` : "Sem comparação"}</span></div>{list.names ? list.names.length ? <ol>{list.names.map(name => <li key={name}><span>{name}</span></li>)}</ol> : <p>{list.empty}</p> : <p>Carregue as listas de matriculados das duas competências para comparar.</p>}</section>)}</div></section>
       {wellhubResult && <section className="panel student-ranking"><div><h3>12 ou mais check-ins no Wellhub</h3><span>{wellhubResult.twelveOrMorePeople.length} pessoas</span></div>{wellhubResult.twelveOrMorePeople.length ? <ol>{wellhubResult.twelveOrMorePeople.map(person => <li key={`${person.name}-${person.checkins}`}><span>{person.name}</span><strong>{person.checkins} check-ins</strong></li>)}</ol> : <p>Nenhuma pessoa atingiu 12 check-ins.</p>}</section>}
       {highestFrequencyResult && <section className="panel student-ranking frequency-ranking"><div><h3>Maiores frequências</h3><span>{highestFrequencyResult.topPeople.length} pessoas</span></div><div className="ranking-columns"><b>Nome</b><b>Quantidade de dias</b></div>{highestFrequencyResult.topPeople.length ? <ol>{highestFrequencyResult.topPeople.map(person => <li key={person.name}><span>{person.name}</span><strong>{person.days}</strong></li>)}</ol> : <p>Nenhuma frequência encontrada.</p>}</section>}

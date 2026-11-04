@@ -4,6 +4,7 @@ export type WellhubStudentReport = {
   frequent: number;
   twelveOrMore: number;
   belowFour: number;
+  belowEight: number;
   twelveOrMorePeople: { name: string; checkins: number }[];
 };
 
@@ -49,9 +50,10 @@ export const calculateWellhubReport = (rows: SheetRows): WellhubStudentReport =>
   });
   const twelveOrMorePeople = people.filter(person => person.checkins >= 12).sort((a, b) => b.checkins - a.checkins || a.name.localeCompare(b.name, "pt-BR"));
   return {
-    frequent: people.filter(person => person.checkins >= 4).length,
+    frequent: people.filter(person => person.checkins >= 8).length,
     twelveOrMore: twelveOrMorePeople.length,
     belowFour: people.filter(person => person.checkins < 4).length,
+    belowEight: people.filter(person => person.checkins < 8).length,
     twelveOrMorePeople,
   };
 };
@@ -66,7 +68,7 @@ export const calculateCloudgymReport = (rows: SheetRows): CloudgymStudentReport 
     const payment = paymentKey(row[5]);
     const gross = numericValue(row[7]);
     if (payment !== "totalpass" && payment !== "gympass" && !enrolled.has(key)) enrolled.set(key, name);
-    if (payment === "totalpass" && gross !== null && gross > 90) frequentTotalPass.add(key);
+    if (payment === "totalpass" && gross !== null && gross > 180) frequentTotalPass.add(key);
   });
   return { enrolled: enrolled.size, frequentTotalPass: frequentTotalPass.size, enrolledPeople: [...enrolled.values()].sort((a, b) => a.localeCompare(b, "pt-BR")) };
 };
@@ -100,4 +102,12 @@ export const calculateHighestFrequencyReport = (rows: SheetRows): HighestFrequen
   return {
     topPeople: [...people.values()].sort((a, b) => b.days - a.days || a.name.localeCompare(b.name, "pt-BR")).slice(0, 20),
   };
+};
+
+export const studentTrendLabel = (current: number | null | undefined, previous: number | null | undefined) => {
+  if (current == null || previous == null) return "Sem comparação com o mês passado";
+  const delta = current - previous;
+  if (delta === 0) return "→ Sem alteração em relação ao mês passado";
+  const count = Math.abs(delta);
+  return `${delta > 0 ? "↑ Maior" : "↓ Menor"} que mês passado por ${count} ${count === 1 ? "aluno" : "alunos"}`;
 };
