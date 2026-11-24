@@ -10,6 +10,7 @@ import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteR
 import { ADMIN_ACCESS_ROLE_ID, APP_RELEASE, ASSIGNMENT_TYPES, CALENDAR_MODES, CALENDAR_TEAM_RELEASE_AT, CAPABILITIES, CLASS_TYPES, FUNCTION_TYPES, MOBILE_SESSION_MS, menus, menuIcons, PERSON_TYPES, RECEPTION_PRIORITY_PERSON_IDS, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY, WEB_INACTIVITY_MS, functionTypeOptions, labels, personTypeOptions, week } from "./domain/constants";
 import { clearSessionMetadata, displayName, formatCurrency, isHolidayOn, isRecessOn, isCalendarRecessOn, isCalendarHolidayOn, calendarClosureLabel, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
 import { chooseCalendarPerson } from "./domain/calendar";
+import { calendarPeopleForDate } from "./domain/calendar-availability";
 import { calculateCloudgymReport, calculateHighestFrequencyReport, calculateWellhubReport, compareEnrolledPeople, previousStudentCompetence, studentDeltaLabel, studentTrendLabel, MAX_STUDENT_IMPORT_BYTES, parseWorkbookRows, type CloudgymStudentReport, type HighestFrequencyReport, type WellhubStudentReport } from "./domain/student-report";
 
 export default function Home() {
@@ -269,7 +270,7 @@ export default function Home() {
         {profile.access_role_type_id === ADMIN_ACCESS_ROLE_ID && <section className={`simulation-bar ${simulationReadOnly ? "active" : ""}`} aria-label="Simulação de perfil"><div><strong>{simulationReadOnly ? `Simulando: ${displayName(simulatedPerson)}` : "Simular visão da equipe"}</strong><small>{simulationReadOnly ? "Modo somente leitura · nenhuma alteração será salva" : "Escolha uma pessoa real para conferir a experiência dela"}</small></div><label>Pessoa<select value={simulatedPersonId} onChange={event => { setSimulatedPersonId(Number(event.target.value)); setScreen("visao"); setManagerMoreOpen(false); }}><option value={0}>Minha visão de admin</option>{people.filter(person => person.active && !isPersonType(person, "manager")).map(person => <option key={person.id} value={person.id}>{displayName(person)} · {personTypeOptions.find(option => option.id === person.person_type_id)?.label}</option>)}</select></label>{simulationReadOnly && <button type="button" onClick={() => { setSimulatedPersonId(0); setScreen("visao"); }}>Sair da simulação</button>}</section>}
         <div className="content">
           {screen === "visao" && <Overview role={viewRole} profile={viewProfile} unitId={unitId} minimumTeachers={selectedUnit?.minimum_teachers ?? 4} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} soloRows={soloRows} onReviewPending={() => setScreen("solo")} />}
-          {screen === "calendario" && <OperationalCalendar role={viewRole} profile={viewProfile} unit={selectedUnit} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} />}
+          {screen === "calendario" && <OperationalCalendar role={viewRole} profile={viewProfile} unit={selectedUnit} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} substitutions={substitutionRows} />}
           {screen === "faltas" && <Absences role={viewRole} profile={viewProfile} unitId={unitId} minimumTeachers={selectedUnit?.minimum_teachers ?? 4} openingDays={openingDays} operationExceptions={operationExceptions} people={people} schedules={schedules} readOnly={simulationReadOnly} />}
           {screen === "solo" && <Solo role={viewRole} profile={viewProfile} unitId={unitId} classes={classes} people={people} schedules={schedules} operationExceptions={operationExceptions} substitutions={substitutionRows} rows={soloRows} setRows={setSoloRows} readOnly={simulationReadOnly} />}
           {screen === "substituicoes" && <Substitutions profile={profile} unitId={unitId} openingDays={openingDays} operationExceptions={operationExceptions} people={people} rows={substitutionRows} setRows={setSubstitutionRows} />}
@@ -426,7 +427,7 @@ function OverviewCalendar({ role, profile, month, minimumTeachers, openingDays, 
   </section>;
 }
 
-function OperationalCalendar({ role, profile, unit, openingDays, operationExceptions, people, schedules }: { role: Role; profile: Profile; unit?: UnitRow; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[] }) {
+function OperationalCalendar({ role, profile, unit, openingDays, operationExceptions, people, schedules, substitutions }: { role: Role; profile: Profile; unit?: UnitRow; openingDays: boolean[]; operationExceptions: OperationExceptionRow[]; people: PersonRow[]; schedules: ScheduleRow[]; substitutions: SubstitutionRow[] }) {
   const [viewMonth, setViewMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [loadedMonth, setLoadedMonth] = useState("");
   const [calendarLoadError, setCalendarLoadError] = useState(false);
@@ -510,10 +511,9 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
   const personName = (id?: number | null) => { const person = people.find(item => item.id === id); return person ? displayName(person) : "Não definido"; };
   const assignmentFor = (date: string, type: number, classId: number | null) => assignments.find(item => item.date === date && item.assignment_type_id === type && item.class_type_id === classId);
   const hasCapability = (personId: number, capabilityId: number) => capabilities.some(item => item.person_id === personId && item.capability_type_id === capabilityId);
-  const scheduledFor = (date: string, includeReception = false) => {
-    const weekday = new Date(`${date}T12:00:00`).getDay();
-    return people.filter(person => person.active && (includeReception || !isPersonType(person, "reception")) && !absences.some(item => item.date === date && item.person_id === person.id) && (schedules.some(schedule => schedule.person_id === person.id && schedule.weekday === weekday && scheduleAppliesOn(schedule, date)) || managerDays.some(extra => extra.manager_id === person.id && extra.date === date)));
-  };
+  const scheduledFor = (date: string, includeReception = false) =>
+    calendarPeopleForDate({ date, people, schedules, absences, managerDays, substitutions })
+      .filter(person => includeReception || !isPersonType(person, "reception"));
   const candidatesFor = (date: string, type: number, classId: number | null) => {
     if (type === ASSIGNMENT_TYPES.reception) {
       const scheduled = scheduledFor(date, true);
