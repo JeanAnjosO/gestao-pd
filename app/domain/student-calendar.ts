@@ -1,4 +1,4 @@
-import { isRecessOn } from "./recess.ts";
+import { isCalendarRecessOn } from "./recess.ts";
 
 export type StudentCalendarCategory = "event" | "workshop" | "holiday" | "simulation" | "notice";
 export type StudentCalendarNote = { date: string; note: string; category: StudentCalendarCategory };
@@ -9,7 +9,7 @@ export function studentMonthDays(year: number, month: number) {
 }
 
 export function studentDayContent(date: string, planning: { date: string; note: string }[], overrides: StudentCalendarNote[], holidays: { date: string; open: boolean; label?: string | null; return_on?: string }[]) {
-  if (isRecessOn(date, holidays)) return { note: "RECESSO", category: "holiday" as const, custom: false };
+  if (isCalendarRecessOn(date, holidays)) return { note: "RECESSO", category: "holiday" as const, custom: false };
   const custom = overrides.find(item => item.date === date);
   if (custom) return { note: custom.note, category: custom.category, custom: true };
 

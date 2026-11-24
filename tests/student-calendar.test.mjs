@@ -32,8 +32,15 @@ test("recess spans the new year without blocking either boundary", () => {
   const recess = [{ date: "2026-12-19", return_on: "2027-01-05", open: false, label: "RECESSO" }];
   assert.equal(studentDayContent("2026-12-19", [], [], recess).note, "");
   assert.equal(studentDayContent("2027-01-05", [], [], recess).note, "");
-  assert.equal(studentDayContent("2026-12-20", [], [], recess).note, "RECESSO");
+  assert.equal(studentDayContent("2026-12-20", [], [], recess).note, "");
   assert.deepEqual(studentDayContent("2027-01-04", [], [{ date: "2027-01-04", note: "Old note", category: "notice" }], recess), {
     note: "RECESSO", category: "holiday", custom: false,
   });
+});
+
+test("recess marks weekdays only in student calendars, preserving weekend notes", () => {
+ const recess = [{date:"2026-12-22",return_on:"2027-01-04",open:false,label:"RECESSO"}];
+ for (const date of ["2026-12-26","2026-12-27","2027-01-02","2027-01-03"]) assert.equal(studentDayContent(date, [], [], recess).note, "");
+ for (const date of ["2026-12-23","2026-12-25","2026-12-31","2027-01-01"]) assert.equal(studentDayContent(date, [], [], recess).note, "RECESSO");
+ assert.equal(studentDayContent("2026-12-27", [], [{date:"2026-12-27",note:"Aviso aos alunos",category:"notice"}], recess).note, "Aviso aos alunos");
 });
