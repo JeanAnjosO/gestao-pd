@@ -27,3 +27,13 @@ test("holidays include planning notes and allow separate student announcements",
   assert.equal(studentDayContent("2026-10-12", planning, [{ date: "2026-10-12", note: "Baile especial", category: "event" }], holidays).note, "Baile especial");
   assert.equal(studentDayContent("2026-10-13", planning, [], holidays).note, "");
 });
+
+test("recess spans the new year without blocking either boundary", () => {
+  const recess = [{ date: "2026-12-19", return_on: "2027-01-05", open: false, label: "RECESSO" }];
+  assert.equal(studentDayContent("2026-12-19", [], [], recess).note, "");
+  assert.equal(studentDayContent("2027-01-05", [], [], recess).note, "");
+  assert.equal(studentDayContent("2026-12-20", [], [], recess).note, "RECESSO");
+  assert.deepEqual(studentDayContent("2027-01-04", [], [{ date: "2027-01-04", note: "Old note", category: "notice" }], recess), {
+    note: "RECESSO", category: "holiday", custom: false,
+  });
+});

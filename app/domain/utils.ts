@@ -1,3 +1,4 @@
+import { isRecessOn } from './recess.ts';
 import type { AccessRoleTypeId, OperationExceptionRow, PersonRow, Profile, Role, ScheduleRow } from "./types";
 import { ADMIN_ACCESS_ROLE_ID, PERSON_TYPES, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY } from "./constants";
 
@@ -6,8 +7,9 @@ export const isPersonType = (person: Pick<PersonRow, "person_type_id"> | Pick<Pr
 export const toUiRole = (value: AccessRoleTypeId): Role => value === PERSON_TYPES.manager || value === ADMIN_ACCESS_ROLE_ID ? "gestor" : value === PERSON_TYPES.teacher ? "professor" : "recepcao";
 export const localIsoDate = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 export const scheduleAppliesOn = (schedule: ScheduleRow, date: string) => schedule.starts_on <= date && (!schedule.ends_on || schedule.ends_on >= date);
-export const unitIsOpenOn = (date: string, openingDays: boolean[], exceptions: OperationExceptionRow[]) => exceptions.find(item => item.date === date)?.open ?? openingDays[new Date(`${date}T12:00:00`).getDay()];
-export const isHolidayOn = (date: string, exceptions: OperationExceptionRow[]) => exceptions.some(item => item.date === date && !item.open);
+export { isRecessOn } from './recess.ts';
+export const unitIsOpenOn = (date: string, openingDays: boolean[], exceptions: OperationExceptionRow[]) => !isRecessOn(date, exceptions) && (exceptions.find(item => !item.return_on && item.date === date)?.open ?? openingDays[new Date(`${date}T12:00:00`).getDay()]);
+export const isHolidayOn = (date: string, exceptions: OperationExceptionRow[]) => isRecessOn(date, exceptions) || exceptions.some(item => !item.return_on && item.date === date && !item.open);
 export const personLevelLabel = (person?: PersonRow) => !person ? "—" : isPersonType(person, "intern") ? "Estagiário(a)" : person.level ? `Nível ${person.level}` : "—";
 export const displayName = (person?: { name: string; nickname?: string | null } | null) => person?.nickname?.trim() || person?.name || "—";
 export const isMobileSession = () => /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || Boolean((navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile);

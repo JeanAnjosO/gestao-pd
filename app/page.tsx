@@ -8,7 +8,7 @@ import { InstallAppPrompt } from "./components/InstallAppPrompt";
 import { Stat, Table, Title } from "./components/ui";
 import type { AbsenceRow, AccessRoleTypeId, CalendarAssignmentRow, CalendarNoteRow, CalendarPeriodRow, CapabilityRow, ClassRow, CompensationRateRow, DailyOverrideRow, FunctionTypeId, ManagerDayRow, MonthlyPeriodEventRow, MonthlyPeriodRow, OperationExceptionRow, PasswordRecoveryRow, PersonRow, PersonTypeId, Profile, Role, ScheduleRow, Screen, SoloRow, SubstitutionRow, UnitRow } from "./domain/types";
 import { ADMIN_ACCESS_ROLE_ID, APP_RELEASE, ASSIGNMENT_TYPES, CALENDAR_MODES, CALENDAR_TEAM_RELEASE_AT, CAPABILITIES, CLASS_TYPES, FUNCTION_TYPES, MOBILE_SESSION_MS, menus, menuIcons, PERSON_TYPES, RECEPTION_PRIORITY_PERSON_IDS, SESSION_ACTIVITY_KEY, SESSION_LOGIN_KEY, SESSION_RELEASE_KEY, WEB_INACTIVITY_MS, functionTypeOptions, labels, personTypeOptions, week } from "./domain/constants";
-import { clearSessionMetadata, displayName, formatCurrency, isHolidayOn, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
+import { clearSessionMetadata, displayName, formatCurrency, isHolidayOn, isRecessOn, isMobileSession, isPersonType, localIsoDate, personLevelLabel, saveImageBlob, scheduleAppliesOn, toUiRole, unitIsOpenOn } from "./domain/utils";
 import { chooseCalendarPerson } from "./domain/calendar";
 import { calculateCloudgymReport, calculateHighestFrequencyReport, calculateWellhubReport, compareEnrolledPeople, previousStudentCompetence, studentDeltaLabel, studentTrendLabel, MAX_STUDENT_IMPORT_BYTES, parseWorkbookRows, type CloudgymStudentReport, type HighestFrequencyReport, type WellhubStudentReport } from "./domain/student-report";
 
@@ -148,20 +148,24 @@ export default function Home() {
       const currentUnit = unitId;
       setOpeningDays([false, false, false, false, false, false, false]);
       setClasses([]); setSoloRows([]); setSubstitutionRows([]); setPeople([]); setSchedules([]); setOperationExceptions([]);
-      const [{ data: days }, { data: classData }, { data: soloData }, { data: substitutionsData }, { data: scheduleData }, { data: exceptionData }] = await Promise.all([
+      const [{ data: days }, { data: classData }, { data: soloData }, { data: substitutionsData }, { data: scheduleData }, { data: exceptionData }, { data: recessData }] = await Promise.all([
         supabase.from("unit_open_days").select("weekday,open").eq("unit_id", currentUnit),
         supabase.from("classes").select("id,name,allowed_for_half_day").eq("unit_id", currentUnit).eq("active", true).order("id"),
         supabase.from("solo_classes").select("id,date,status,teacher_id,classes(name),people!solo_classes_teacher_id_fkey(name,nickname)").eq("unit_id", currentUnit).order("date", { ascending: false }),
         supabase.from("substitutions").select("id,date,substitute_person_id,external_name,external_level,daily_type,created_by,people!substitutions_substitute_person_id_fkey(name,nickname)").eq("unit_id", currentUnit).order("date", { ascending: false }),
         supabase.from("schedules").select("id,person_id,weekday,daily_type,starts_on,ends_on").eq("unit_id", currentUnit).order("weekday"),
         supabase.from("operation_exceptions").select("id,date,open,label").eq("unit_id", currentUnit).order("date"),
+        supabase.from("unit_recesses").select("id,last_open_on,return_on").eq("unit_id", currentUnit).order("last_open_on"),
       ]);
       if (days) setOpeningDays(Array.from({ length: 7 }, (_, i) => Boolean(days.find((d) => d.weekday === i)?.open)));
       if (classData) setClasses(classData as ClassRow[]);
       if (soloData) setSoloRows(soloData as unknown as SoloRow[]);
       if (substitutionsData) setSubstitutionRows(substitutionsData as unknown as SubstitutionRow[]);
       if (scheduleData) setSchedules(scheduleData as ScheduleRow[]);
-      if (exceptionData) setOperationExceptions(exceptionData as OperationExceptionRow[]);
+      setOperationExceptions([
+        ...(exceptionData ?? []),
+        ...(recessData ?? []).map(row => ({ id: -row.id, date: row.last_open_on, return_on: row.return_on, open: false, label: "RECESSO" })),
+      ]);
       const { data: memberRows } = await supabase.from("unit_memberships").select("person_id,started_on").eq("unit_id", currentUnit);
       const personIds = memberRows?.map((m) => m.person_id) ?? [];
       if (personIds.length) {
@@ -675,10 +679,10 @@ function OperationalCalendar({ role, profile, unit, openingDays, operationExcept
     {message && <p className="operation-message calendar-message">{message}</p>}
     {tab === "students" && isManager ? loadedMonth !== `${unit.id}-${start}` ? <div className="panel" role="status">Carregando calendário…</div> : period?.status === "published" ? <StudentCalendar key={`${unit.id}-${start}`} unit={unit} personId={profile.id} year={year} month={month} planningNotes={notes} holidays={operationExceptions} /> : <div className="panel calendar-empty"><strong>Publique a escala para gerar o calendário dos alunos</strong><p>Depois da publicação, todos os dias do mês e as observações do planejamento aparecerão aqui.</p></div> : tab === "planning" ? <div className="calendar-planning">
       {isManager && <div className="calendar-actions panel"><div><strong>{missingCount || conflictCount ? `${missingCount} pendentes · ${conflictCount} afetadas por falta` : "Escala completa"}</strong><small>Ao refazer, dias anteriores e observações são preservados.</small></div><button className="primary" disabled={busy} onClick={assignments.length ? rebuildCalendar : () => generateCalendar()}>{busy ? "Gerando…" : assignments.length ? "Refazer calendário" : "Montar calendário"}</button><button className="delete-action" disabled={busy || (!assignments.length && !notes.length)} onClick={clearCalendar}>Limpar calendário</button><button disabled={!period || busy} onClick={publishCalendar}>Publicar escala</button></div>}
-      <div className="calendar-days">{days.map(date => { const holiday = isHolidayOn(date, operationExceptions); const hasConflict = !holiday && assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)); return <section className={`calendar-day-card ${holiday ? "holiday-card" : requiredSlots.some(slot => slot.date === date && !assignmentFor(date, slot.type, slot.classId)) ? "has-pending" : ""} ${hasConflict ? "has-conflict" : ""}`} key={date}><header><div><strong>{formatDay(date)}</strong><small>{holiday ? "FERIADO" : hasConflict ? "Atenção: responsável com falta" : unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples" : "3 turmas"}</small></div>{holiday ? <input value="FERIADO" aria-label={`Observação de ${date}`} disabled readOnly /> : isManager ? <input maxLength={240} defaultValue={notes.find(item => item.date === date)?.note ?? ""} placeholder="Observação do dia" onBlur={event => saveNote(date, event.target.value)} /> : <span>{notes.find(item => item.date === date)?.note || "Sem observação"}</span>}</header><div className="calendar-day-rows">{classSlots.map(classType => <div className={`calendar-duty-row class-${classType.code}`} key={classType.id ?? "simple"}>{classType.id && <span className="class-marker">{classType.label}</span>}<label><small>Roda</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 1, classType.id) : <strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong>}</label><label><small>Som</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 2, classType.id) : <strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong>}</label></div>)}</div><div className="calendar-reception"><small>Portaria</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 3, null) : <strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong>}</div></section>; })}</div>
+      <div className="calendar-days">{days.map(date => { const holiday = isHolidayOn(date, operationExceptions); const hasConflict = !holiday && assignments.some(item => item.date === date && absences.some(absence => absence.date === date && absence.person_id === item.person_id)); return <section className={`calendar-day-card ${holiday ? "holiday-card" : requiredSlots.some(slot => slot.date === date && !assignmentFor(date, slot.type, slot.classId)) ? "has-pending" : ""} ${hasConflict ? "has-conflict" : ""}`} key={date}><header><div><strong>{formatDay(date)}</strong><small>{holiday ? (isRecessOn(date, operationExceptions) ? "RECESSO" : "FERIADO") : hasConflict ? "Atenção: responsável com falta" : unit.calendar_mode_type_id === CALENDAR_MODES.simple ? "Escala simples" : "3 turmas"}</small></div>{holiday ? <input value={isRecessOn(date, operationExceptions) ? "RECESSO" : "FERIADO"} aria-label={`Observação de ${date}`} disabled readOnly /> : isManager ? <input maxLength={240} defaultValue={notes.find(item => item.date === date)?.note ?? ""} placeholder="Observação do dia" onBlur={event => saveNote(date, event.target.value)} /> : <span>{notes.find(item => item.date === date)?.note || "Sem observação"}</span>}</header><div className="calendar-day-rows">{classSlots.map(classType => <div className={`calendar-duty-row class-${classType.code}`} key={classType.id ?? "simple"}>{classType.id && <span className="class-marker">{classType.label}</span>}<label><small>Roda</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 1, classType.id) : <strong>{personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong>}</label><label><small>Som</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 2, classType.id) : <strong>{personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong>}</label></div>)}</div><div className="calendar-reception"><small>Portaria</small>{holiday ? <span className="holiday-empty" /> : isManager ? selectFor(date, 3, null) : <strong>{personName(assignmentFor(date, 3, null)?.person_id)}</strong>}</div></section>; })}</div>
     </div> : <div className="calendar-board-area">
       <div className="board-controls panel"><label>Período<select value={range} onChange={event => setRange(event.target.value as typeof range)}><option value="first">1º quadro · até a 2ª sexta</option><option value="second">2º quadro · restante do mês</option><option value="month">Mês completo</option></select></label>{isManager && <><button onClick={() => exportImage(false)} disabled={busy}>Baixar imagem</button><button className="primary" onClick={() => exportImage(true)} disabled={busy}>Compartilhar</button><button onClick={() => window.print()}>Imprimir / PDF</button></>}</div>
-      <div className="calendar-board-scroll"><div className={`calendar-share-board mode-${unit.calendar_mode_type_id === 1 ? "simple" : "colors"}`} ref={boardRef}><div className="share-board-heading"><div className="share-board-brand"><div><span>GESTÃO PD</span><h3>{unit.name}</h3></div><strong>Calendário {monthName}</strong></div><div><small>{range === "month" ? "Mês completo" : range === "first" ? "1º quadro · até a 2ª sexta" : "2º quadro · restante do mês"}</small></div></div><table><thead><tr><th>Data</th><th>Roda</th><th>Som</th><th>Portaria</th><th>Observação</th></tr></thead><tbody>{visibleDays.flatMap((date, dayIndex) => { const holiday = isHolidayOn(date, operationExceptions); const rows = classSlots.map((classType, index) => <tr className={holiday ? "board-holiday-row" : `class-${classType.code}`} key={`${date}-${classType.id ?? "simple"}`}>{index === 0 && <td className="board-date-cell board-merged-cell" rowSpan={classSlots.length}>{formatDay(date)}</td>}<td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong></td><td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong></td>{index === 0 && <td className="board-reception-cell board-merged-cell" rowSpan={classSlots.length}><strong>{holiday ? "" : personName(assignmentFor(date, 3, null)?.person_id)}</strong></td>}{index === 0 && <td className="board-note-cell board-merged-cell" rowSpan={classSlots.length}>{holiday ? "FERIADO" : notes.find(item => item.date === date)?.note ?? ""}</td>}</tr>); const showWeek = dayIndex === 0 || calendarWeek(visibleDays[dayIndex - 1]) !== calendarWeek(date); return [<tr className="board-week-row" key={`week-${date}`}><td colSpan={5}>Semana {calendarWeek(date)}</td></tr>, ...rows].filter((_, index) => showWeek || index > 0); })}</tbody></table><div className="share-board-footer"><span>Roda · Som · Portaria</span><small>Atualizado em {new Date().toLocaleDateString("pt-BR")}</small></div></div></div>
+      <div className="calendar-board-scroll"><div className={`calendar-share-board mode-${unit.calendar_mode_type_id === 1 ? "simple" : "colors"}`} ref={boardRef}><div className="share-board-heading"><div className="share-board-brand"><div><span>GESTÃO PD</span><h3>{unit.name}</h3></div><strong>Calendário {monthName}</strong></div><div><small>{range === "month" ? "Mês completo" : range === "first" ? "1º quadro · até a 2ª sexta" : "2º quadro · restante do mês"}</small></div></div><table><thead><tr><th>Data</th><th>Roda</th><th>Som</th><th>Portaria</th><th>Observação</th></tr></thead><tbody>{visibleDays.flatMap((date, dayIndex) => { const holiday = isHolidayOn(date, operationExceptions); const rows = classSlots.map((classType, index) => <tr className={holiday ? "board-holiday-row" : `class-${classType.code}`} key={`${date}-${classType.id ?? "simple"}`}>{index === 0 && <td className="board-date-cell board-merged-cell" rowSpan={classSlots.length}>{formatDay(date)}</td>}<td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 1, classType.id)?.person_id)}</strong></td><td className="board-duty-cell"><strong>{holiday ? "" : personName(assignmentFor(date, 2, classType.id)?.person_id)}</strong></td>{index === 0 && <td className="board-reception-cell board-merged-cell" rowSpan={classSlots.length}><strong>{holiday ? "" : personName(assignmentFor(date, 3, null)?.person_id)}</strong></td>}{index === 0 && <td className="board-note-cell board-merged-cell" rowSpan={classSlots.length}>{holiday ? (isRecessOn(date, operationExceptions) ? "RECESSO" : "FERIADO") : notes.find(item => item.date === date)?.note ?? ""}</td>}</tr>); const showWeek = dayIndex === 0 || calendarWeek(visibleDays[dayIndex - 1]) !== calendarWeek(date); return [<tr className="board-week-row" key={`week-${date}`}><td colSpan={5}>Semana {calendarWeek(date)}</td></tr>, ...rows].filter((_, index) => showWeek || index > 0); })}</tbody></table><div className="share-board-footer"><span>Roda · Som · Portaria</span><small>Atualizado em {new Date().toLocaleDateString("pt-BR")}</small></div></div></div>
     </div>}
   </>;
 }
@@ -773,6 +777,12 @@ function Solo({ role, profile, unitId, classes, people, schedules, operationExce
     const checkDay = async () => {
       const selected = new Date(`${recordDate}T12:00:00`);
       const weekday = selected.getDay();
+      if (isRecessOn(recordDate, operationExceptions)) {
+        setCanRecord(false);
+        setDailyType(null);
+        setMessage("Aulas solo bloqueadas durante o recesso.");
+        return;
+      }
       const holiday = isHolidayOn(recordDate, operationExceptions);
       const [{ data: overrideData }, { data: absenceData }, { data: periodData }, { data: scheduleData }, { data: substitutionData }] = await Promise.all([
         supabase.from("daily_overrides").select("daily_type").eq("unit_id", unitId).eq("person_id", targetTeacherId).eq("date", recordDate).limit(1),
@@ -802,7 +812,7 @@ function Solo({ role, profile, unitId, classes, people, schedules, operationExce
   const dailyLimit = dailyType === "half" ? 2 : dailyType === "full" ? 3 : 0;
   const save = async (form: FormData) => {
     if (readOnly) return;
-    if (!unitId || !canRecord || !dailyType) return;
+    if (!unitId || !canRecord || !dailyType || isRecessOn(recordDate, operationExceptions)) return;
     const classId = Number(form.get("class_id"));
     const selectedClass = classes.find(item => item.id === classId);
     if (!selectedClass || (dailyType === "half" && !selectedClass.allowed_for_half_day)) { setMessage("Esta turma não é permitida para meia diária."); return; }
@@ -874,6 +884,7 @@ function Substitutions({ profile, unitId, openingDays, operationExceptions, peop
     const currentMonth = new Date(); currentMonth.setDate(1); currentMonth.setHours(0,0,0,0);
     const selectedMonth = new Date(`${date.slice(0,7)}-01T12:00:00`);
     if (selectedMonth < currentMonth) { setMessage("Não é possível incluir registros em meses anteriores ao vigente."); return false; }
+    if (isRecessOn(date, operationExceptions)) { setMessage("Data bloqueada pelo recesso."); return false; }
     const holiday = isHolidayOn(date, operationExceptions);
     if (holiday && !allowHoliday) { setMessage("Use Ajuste de diária para registrar trabalho em feriados."); return false; }
     if (!holiday && !unitIsOpenOn(date, openingDays, operationExceptions)) { setMessage("A unidade está configurada como fechada nesta data."); return false; }
@@ -1132,6 +1143,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
     let total = 0;
     let complete = 0;
     const scheduledDays = days.filter(date => {
+      if (isRecessOn(date, operationExceptions)) return false;
       const override = overrides.find(item => item.person_id === person.id && item.date === date);
       if (isHolidayOn(date, operationExceptions)) return Boolean(override) && !absences.some(absence => absence.person_id === person.id && absence.date === date);
       if (!unitIsOpenOn(date, openingDays, operationExceptions)) return false;
@@ -1152,7 +1164,7 @@ function Reports({ profile, unitId, openingDays, people, schedules, operationExc
     personSubstitutions.forEach(item => { dailyTypes.push(item.daily_type); total += 1; if (item.daily_type === "full") complete += 1; });
     const baseIsHalf = schedules.some(item => item.person_id === person.id && item.daily_type === "half" && scheduleAppliesOn(item, monthEnd));
     const totalLabel = baseIsHalf && complete ? `${total}, ${complete} comp` : String(total);
-    const approvedSolo = soloRows.filter(item => item.teacher_id === person.id && item.status === "approved" && item.date.startsWith(prefix)).length;
+    const approvedSolo = soloRows.filter(item => item.teacher_id === person.id && item.status === "approved" && item.date.startsWith(prefix) && !isRecessOn(item.date, operationExceptions)).length;
     if (!person.active && total === 0 && approvedSolo === 0) return [];
     const absenceCount = absences.filter(item => item.person_id === person.id).length;
     const functionLabel = isPersonType(person, "teacher") ? "Professor(a)" : isPersonType(person, "reception") ? "Recepção" : "Estagiário(a)";
@@ -1245,6 +1257,10 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
   const [editScheduleDailyType, setEditScheduleDailyType] = useState("full");
   const today = new Date();
   const currentMonthStart = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2,"0")}-01`;
+  const [lastOpenOn, setLastOpenOn] = useState("");
+  const [returnOn, setReturnOn] = useState("");
+  const [recessMessage, setRecessMessage] = useState("");
+  const [recessBusy, setRecessBusy] = useState(false);
   const [exceptionDate, setExceptionDate] = useState(currentMonthStart);
   const [exceptionOpen, setExceptionOpen] = useState(false);
   const [exceptionLabel, setExceptionLabel] = useState("");
@@ -1435,13 +1451,38 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
     const { error } = await supabase.from("schedules").update({ ends_on: endDate }).in("id", activeIds);
     if (!error) setSchedules(schedules.map(schedule => activeIds.includes(schedule.id) ? { ...schedule, ends_on: endDate } : schedule));
   };
+  const saveRecess = async () => {
+    if (!unitId || !lastOpenOn || !returnOn || recessBusy) return;
+    setRecessBusy(true);
+    const { data, error } = await supabase.from("unit_recesses")
+      .insert({ unit_id: unitId, last_open_on: lastOpenOn, return_on: returnOn })
+      .select("id,last_open_on,return_on").single();
+    setRecessBusy(false);
+    if (error || !data) {
+      setRecessMessage("N foi poss salvar. Informe pelo menos um dia entre as datas e confira se j um recesso nesse per.");
+      return;
+    }
+    setOperationExceptions([...operationExceptions, { id: -data.id, date: data.last_open_on, return_on: data.return_on, open: false, label: "RECESSO" }]);
+    setLastOpenOn("");
+    setReturnOn("");
+    setRecessMessage("Recesso cadastrado.");
+  };
+  const removeRecess = async (row: OperationExceptionRow) => {
+    if (recessBusy) return;
+    setRecessBusy(true);
+    const { error } = await supabase.from("unit_recesses").delete().eq("id", -row.id);
+    setRecessBusy(false);
+    if (error) { setRecessMessage("N foi poss excluir o recesso."); return; }
+    setOperationExceptions(operationExceptions.filter(item => item.id !== row.id));
+    setRecessMessage("Recesso exclu.");
+  };
   const saveOperationException = async () => {
     if (!unitId || !exceptionDate) return;
     setExceptionMessage("");
     const payload = { unit_id: unitId, date: exceptionDate, open: exceptionOpen, label: exceptionOpen ? exceptionLabel.trim() || null : "FERIADO" };
     const { data, error } = await supabase.from("operation_exceptions").upsert(payload, { onConflict: "unit_id,date" }).select("id,date,open,label").single();
     if (error || !data) { setExceptionMessage("Não foi possível salvar esta configuração."); return; }
-    const next = [...operationExceptions.filter(item => item.date !== data.date), data as OperationExceptionRow].sort((a,b) => a.date.localeCompare(b.date));
+    const next = [...operationExceptions.filter(item => item.return_on || item.date !== data.date), data as OperationExceptionRow].sort((a,b) => a.date.localeCompare(b.date));
     setOperationExceptions(next);
     setExceptionLabel("");
     setExceptionMessage("Configuração salva.");
@@ -1532,8 +1573,24 @@ function Parameters({ profile, unitId, units, setUnits, selectUnit, openingDays,
     <details className="panel collapsible operation-section parameters-holidays"><summary><div><h3>Feriados e funcionamento</h3><p>Registre feriados ou aberturas excepcionais por data.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
       <div className="operation-form exception-form"><label>Data<input type="date" min={currentMonthStart} value={exceptionDate} onChange={event => setExceptionDate(event.target.value)} /></label><label>Funcionamento<select value={exceptionOpen ? "open" : "closed"} onChange={event => { const open = event.target.value === "open"; setExceptionOpen(open); setExceptionLabel(open ? "" : "FERIADO"); }}><option value="closed">Feriado</option><option value="open">Unidade aberta excepcionalmente</option></select></label><label>Identificação<input value={exceptionOpen ? exceptionLabel : "FERIADO"} disabled={!exceptionOpen} onChange={event => setExceptionLabel(event.target.value)} placeholder="Motivo da abertura" /></label><button type="button" className="primary" onClick={saveOperationException}>Salvar configuração</button></div>
       {exceptionMessage && <p className="operation-message">{exceptionMessage}</p>}
-      <OperationTable headers={["Data","Funcionamento","Identificação","Ação"]} rows={operationExceptions.map(row => [row.date.split("-").reverse().join("/"), row.open ? "Aberta excepcionalmente" : "Feriado", row.label ?? "—", <div className="row-actions" key={row.id}><button className="delete-action" onClick={() => deleteOperationException(row)}>Excluir</button></div>])} />
+      <OperationTable headers={["Data","Funcionamento","Identificação","Ação"]} rows={operationExceptions.filter(row => !row.return_on).map(row => [row.date.split("-").reverse().join("/"), row.open ? "Aberta excepcionalmente" : "Feriado", row.label ?? "—", <div className="row-actions" key={row.id}><button className="delete-action" onClick={() => deleteOperationException(row)}>Excluir</button></div>])} />
     </div></details>
+    <details className="panel collapsible operation-section">
+      <summary><div><h3>Recesso</h3><p>Os dias entre a ú e a volta ficam bloqueados.</p></div><span className="summary-action">Ocultar</span></summary>
+      <div className="collapsible-content">
+        <form className="operation-form exception-form" onSubmit={event => { event.preventDefault(); void saveRecess(); }}>
+          <label>Ú<input required type="date" value={lastOpenOn} onChange={event => setLastOpenOn(event.target.value)} /></label>
+          <label>Primeiro dia de retorno<input required type="date" value={returnOn} onChange={event => setReturnOn(event.target.value)} /></label>
+          <button type="submit" className="primary" disabled={!unitId || recessBusy}>Salvar recesso</button>
+        </form>
+        {recessMessage && <p role="status" className="operation-message">{recessMessage}</p>}
+        <OperationTable headers={["Ú", "Primeiro dia de retorno", "A"]} rows={operationExceptions.filter(row => row.return_on).map(row => [
+          row.date.split("-").reverse().join("/"),
+          row.return_on?.split("-").reverse().join("/"),
+          <button key={row.id} type="button" className="delete-action" disabled={recessBusy} onClick={() => void removeRecess(row)}>Excluir</button>,
+        ])} />
+      </div>
+    </details>
     <details className="panel collapsible operation-section parameters-periods"><summary><div><h3>Competências</h3><p>Fechamento automático D+1 útil e reaberturas controladas.</p></div><span className="summary-action">Ocultar</span></summary><div className="collapsible-content">
       <div className="competency-note"><strong>Fechamento automático ativo</strong><span>A rotina verifica as competências a cada hora e fecha no primeiro dia útil após o fim do mês.</span></div>
       {periodMessage && <p className="operation-message">{periodMessage}</p>}

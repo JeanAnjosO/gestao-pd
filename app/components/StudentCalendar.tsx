@@ -1,4 +1,6 @@
 "use client";
+import { isRecessOn } from "../domain/recess.ts";
+
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toPng } from "html-to-image";
@@ -53,6 +55,7 @@ export function StudentCalendar({ unit, personId, year, month, planningNotes, ho
   }, [loading, loadError]);
 
   const selectDay = (date: string) => {
+    if (isRecessOn(date, holidays)) return;
     const value = content(date);
     setSelected(date); setText(value.note); setCategory(value.category); setMessage("");
   };
@@ -124,7 +127,7 @@ export function StudentCalendarPoster({ unitName, year, month, planningNotes, ho
           const date = days[index - offset];
           if (!date) return <div className="student-calendar-blank" key={`empty-${index}`} aria-hidden="true" />;
           const item = content(date);
-          return <button type="button" role="gridcell" className={`student-calendar-date ${item.note ? `student-event-${item.category}` : ""} ${index % 7 === 0 || index % 7 === 6 ? "student-weekend" : ""}`} key={date} disabled={disabled} onClick={() => onSelect(date)} aria-label={`${Number(date.slice(-2))} de ${monthLabel}${item.note ? `: ${item.note}` : ": adicionar observação"}`}><b>{Number(date.slice(-2))}</b><span>{item.note}</span></button>;
+          return <button type="button" role="gridcell" className={`student-calendar-date ${item.note ? `student-event-${item.category}` : ""} ${index % 7 === 0 || index % 7 === 6 ? "student-weekend" : ""}`} key={date} disabled={disabled || isRecessOn(date, holidays)} onClick={() => onSelect(date)} aria-label={`${Number(date.slice(-2))} de ${monthLabel}${item.note ? `: ${item.note}` : ": adicionar observação"}`}><b>{Number(date.slice(-2))}</b><span>{item.note}</span></button>;
         })}
       </div>
       <footer className="student-calendar-footer"><div>{categories.map(item => <span key={item.value}><i className={`student-event-${item.value}`} />{item.label}</span>)}</div><p>Programe-se e venha dançar com a gente!</p></footer>
